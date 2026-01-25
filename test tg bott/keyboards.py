@@ -190,6 +190,23 @@ class Keyboards:
         )
 
     @staticmethod
+    def offer_buyer_decision_kb(offer_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✅ Принять отклик",
+                        callback_data=f"offer:buyer_accept:{offer_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="❌ Отклонить отклик",
+                        callback_data=f"offer:buyer_reject:{offer_id}",
+                    ),
+                ]
+            ]
+        )
+
+    @staticmethod
     def deal_paid_kb_for_side(offer_id: int, side: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[

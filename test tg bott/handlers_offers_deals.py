@@ -35,6 +35,50 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             return topic.message_thread_id
         except Exception:
             return None
+
+    def build_deal_payment_texts(offer_id: int, offer: dict, req: dict) -> tuple[str, str]:
+        base_price = offer["price_cents"] / 100.0
+        buyer_total = base_price * 1.07
+        seller_deposit = base_price * 0.0535
+        buyer_deposit = base_price * 0.2675
+
+        deal_link = build_request_link(cfg, req) or ""
+        if deal_link:
+            deal_text = f'<a href="{deal_link}">Сделка №{offer_id}</a>'
+        else:
+            deal_text = f"Сделка №{offer_id}"
+
+        block = (
+            f"Сумма за которую продавец продает: {base_price:.2f} руб.\n"
+            f"Сумма оплаты для покупателя: {buyer_total:.2f} руб.\n"
+            f"Сумма залога для продавца: {seller_deposit:.2f} руб.\n"
+            f"Сумма залога для покупателя: {buyer_deposit:.2f} руб."
+        )
+
+        buyer_text = (
+            "✅ Ваш отклик подтвержден, можно переходить к оплате.\n\n"
+            f"{deal_text}\n\n"
+            f"Сумма товара: {base_price:.2f} руб.\n"
+            f"Ваш залог (25%): {buyer_deposit:.2f} руб.\n\n"
+            f"{block}\n\n"
+            f"{cfg.MANAGER_REQUISITES_TEXT}\n\n"
+            f"Укажите в комментарии «№{offer_id}».\n\n"
+            "После оплаты нажмите кнопку «Оплатил»."
+        )
+
+        seller_text = (
+            "✅ Покупатель принял отклик, можно переходить к оплате.\n\n"
+            f"{deal_text}\n\n"
+            f"Сумма товара: {base_price:.2f} руб.\n"
+            f"Ваш залог (5,35%): {seller_deposit:.2f} руб.\n\n"
+            f"{block}\n\n"
+            f"{cfg.MANAGER_REQUISITES_TEXT}\n\n"
+            f"Укажите в комментарии «№{offer_id}».\n\n"
+            "После оплаты нажмите кнопку «Оплатил»."
+        )
+
+        return buyer_text, seller_text
+
     # ===== FSM отклика =====
 
     @router.message(OfferCreate.waiting_for_price)
@@ -186,51 +230,32 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         buyer_id = req["user_id"]        # автор заявки (покупатель)
         seller_id = offer["buyer_id"]    # автор отклика (продавец)
 
-        base_price = offer["price_cents"] / 100.0
-        buyer_total = base_price * 1.07
-        seller_deposit = base_price * 0.0535
-        buyer_deposit = base_price * 0.2675
-
         deal_link = build_request_link(cfg, req) or ""
         if deal_link:
             deal_text = f'<a href="{deal_link}">Сделка №{offer_id}</a>'
         else:
             deal_text = f"Сделка №{offer_id}"
 
-        block = (
-            f"Сумма за которую продавец продает: {base_price:.2f} руб.\n"
-            f"Сумма оплаты для покупателя: {buyer_total:.2f} руб.\n"
-            f"Сумма залога для продавца: {seller_deposit:.2f} руб.\n"
-            f"Сумма залога для покупателя: {buyer_deposit:.2f} руб."
-        )
-
         buyer_text = (
             "✅ Ваш запрос получил одобренный отклик.\n\n"
             f"{deal_text}\n\n"
-            f"Сумма товара: {base_price:.2f} руб.\n"
-            f"Ваш залог (25%): {buyer_deposit:.2f} руб.\n\n"
-            f"{block}\n\n"
-            f"{cfg.MANAGER_REQUISITES_TEXT}\n\n"
-            f"Укажите в комментарии «№{offer_id}».\n\n"
-            "После оплаты нажмите кнопку «Оплатил»."
+            f"Цена: {offer['price_cents'] / 100.0:.2f} руб.\n"
+            f"Срок доставки: {offer['days']} дн.\n"
+            f"Состояние: {offer['condition']}/10\n\n"
+            "Принять отклик?"
         )
 
         seller_text = (
-            "✅ Ваш отклик одобрен, сделка создана.\n\n"
+            "✅ Ваш отклик одобрен модератором.\n\n"
             f"{deal_text}\n\n"
-            f"Сумма товара: {base_price:.2f} руб.\n"
-            f"Ваш залог (5,35%): {seller_deposit:.2f} руб.\n\n"
-            f"{block}\n\n"
-            f"{cfg.MANAGER_REQUISITES_TEXT}\n\n"
-            f"Укажите в комментарии «№{offer_id}».\n\n"
-            "После оплаты нажмите кнопку «Оплатил»."
+            "Ожидаем решения покупателя."
         )
 
         try:
             await cq.bot.send_message(
                 chat_id=buyer_id,
                 text=buyer_text,
-                reply_markup=Keyboards.deal_paid_kb_for_side(offer_id, "buyer"),
+                reply_markup=Keyboards.offer_buyer_decision_kb(offer_id),
             )
         except Exception:
             pass
@@ -239,7 +264,6 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             await cq.bot.send_message(
                 chat_id=seller_id,
                 text=seller_text,
-                reply_markup=Keyboards.deal_paid_kb_for_side(offer_id, "seller"),
             )
         except Exception:
             pass
@@ -259,18 +283,139 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             if cq.message.photo:
                 await cq.message.edit_caption(
                     (cq.message.caption or "")
-                    + "\n\n✅ Отклик одобрен, сделка создана.",
+                    + "\n\n✅ Отклик одобрен, ожидаем решение покупателя.",
                     reply_markup=None,
                 )
             else:
                 await cq.message.edit_text(
-                    (cq.message.text or "") + "\n\n✅ Отклик одобрен, сделка создана.",
+                    (cq.message.text or "")
+                    + "\n\n✅ Отклик одобрен, ожидаем решение покупателя.",
                     reply_markup=None,
                 )
         except Exception:
             pass
 
         await cq.answer("Отклик одобрен.")
+
+    @router.callback_query(F.data.startswith("offer:buyer_accept:"))
+    async def offer_buyer_accept(cq: CallbackQuery):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Отклик не найден.", show_alert=True)
+            return
+
+        req = await db.get_request(offer["request_id"])
+        if not req:
+            await cq.answer("Заявка не найдена.", show_alert=True)
+            return
+
+        if req["user_id"] != cq.from_user.id:
+            await cq.answer("Нет доступа к этому отклику.", show_alert=True)
+            return
+
+        if offer["status"] == "buyer_accepted":
+            await cq.answer("Отклик уже принят.", show_alert=True)
+            return
+
+        if offer["status"] in {"buyer_rejected", "rejected"}:
+            await cq.answer("Отклик уже отклонён.", show_alert=True)
+            return
+
+        await db.set_offer_status(offer_id, "buyer_accepted")
+
+        buyer_text, seller_text = build_deal_payment_texts(offer_id, offer, req)
+
+        try:
+            await cq.bot.send_message(
+                chat_id=req["user_id"],
+                text=buyer_text,
+                reply_markup=Keyboards.deal_paid_kb_for_side(offer_id, "buyer"),
+            )
+        except Exception:
+            pass
+
+        try:
+            await cq.bot.send_message(
+                chat_id=offer["buyer_id"],
+                text=seller_text,
+                reply_markup=Keyboards.deal_paid_kb_for_side(offer_id, "seller"),
+            )
+        except Exception:
+            pass
+
+        if req.get("channel_message_id"):
+            try:
+                await cq.bot.edit_message_reply_markup(
+                    chat_id=cfg.REQUESTS_PUBLIC_CHANNEL_ID,
+                    message_id=req["channel_message_id"],
+                    reply_markup=None,
+                )
+            except Exception:
+                pass
+
+        try:
+            if cq.message.photo:
+                await cq.message.edit_caption(
+                    (cq.message.caption or "") + "\n\n✅ Вы приняли отклик.",
+                    reply_markup=None,
+                )
+            else:
+                await cq.message.edit_text(
+                    (cq.message.text or "") + "\n\n✅ Вы приняли отклик.",
+                    reply_markup=None,
+                )
+        except Exception:
+            pass
+
+        await cq.answer("Отклик принят.")
+
+    @router.callback_query(F.data.startswith("offer:buyer_reject:"))
+    async def offer_buyer_reject(cq: CallbackQuery):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Отклик не найден.", show_alert=True)
+            return
+
+        req = await db.get_request(offer["request_id"])
+        if not req:
+            await cq.answer("Заявка не найдена.", show_alert=True)
+            return
+
+        if req["user_id"] != cq.from_user.id:
+            await cq.answer("Нет доступа к этому отклику.", show_alert=True)
+            return
+
+        if offer["status"] in {"buyer_rejected", "rejected"}:
+            await cq.answer("Отклик уже отклонён.", show_alert=True)
+            return
+
+        await db.set_offer_status(offer_id, "buyer_rejected")
+
+        try:
+            await cq.bot.send_message(
+                chat_id=offer["buyer_id"],
+                text=f"Покупатель отклонил отклик по сделке №{offer_id}.",
+            )
+        except Exception:
+            pass
+
+        try:
+            if cq.message.photo:
+                await cq.message.edit_caption(
+                    (cq.message.caption or "") + "\n\n❌ Вы отклонили отклик.",
+                    reply_markup=None,
+                )
+            else:
+                await cq.message.edit_text(
+                    (cq.message.text or "") + "\n\n❌ Вы отклонили отклик.",
+                    reply_markup=None,
+                )
+        except Exception:
+            pass
+
+        await cq.answer("Отклик отклонён.")
 
     @router.callback_query(F.data.startswith("offer:reject:"))
     async def offer_reject(cq: CallbackQuery):
@@ -305,6 +450,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         offer = await db.get_offer(offer_id)
         if not offer:
             await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+        if offer["status"] != "buyer_accepted":
+            await cq.answer("Отклик ещё не подтверждён покупателем.", show_alert=True)
             return
 
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
