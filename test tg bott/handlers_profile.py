@@ -57,6 +57,25 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
     async def my_profile(msg: Message):
         await send_profile(msg)
 
+    @router.message(F.text == "🤝 Рефералы")
+    async def my_referrals(msg: Message):
+        user_id = msg.from_user.id
+        code = await db.ensure_referral_code(user_id)
+        count = await db.get_referral_count(user_id)
+
+        bot = await msg.bot.get_me()
+        bot_username = bot.username or ""
+        link = f"https://t.me/{bot_username}?start=ref_{code}" if bot_username else code
+
+        text_lines = [
+            "Ваша реферальная статистика:",
+            f"Приглашено пользователей: {count}",
+            "",
+            "Ваша реферальная ссылка:",
+            link,
+        ]
+        await msg.answer("\n".join(text_lines))
+
     @router.callback_query(F.data == "profile:cdek")
     async def edit_cdek(cq: CallbackQuery, state: FSMContext):
         await state.set_state(ProfileEdit.waiting_for_cdek_form)

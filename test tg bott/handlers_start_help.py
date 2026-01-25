@@ -39,11 +39,12 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
         if " " in text:
             payload = text.split(" ", 1)[1].strip()
 
-        await db.add_user(
+        is_new_user = await db.add_user(
             user_id=user.id,
             username=user.username,
             full_name=user.full_name or "",
         )
+        await db.ensure_referral_code(user.id)
 
         accepted = await db.is_offer_accepted(user.id)
 
@@ -93,6 +94,14 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
             else:
                 await msg.answer(caption)
             return
+
+        if payload and payload.startswith("ref_") and is_new_user:
+            ref_code = payload.split("_", 1)[1]
+            referrer_id = await db.get_user_id_by_referral_code(ref_code)
+            if referrer_id and referrer_id != user.id:
+                existing_referrer = await db.get_referrer_id(user.id)
+                if existing_referrer is None:
+                    await db.set_referrer(user.id, referrer_id)
 
         # обычный /start
         if not accepted:

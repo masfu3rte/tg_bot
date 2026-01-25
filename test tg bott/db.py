@@ -1,6 +1,8 @@
 import sqlite3
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime
+import secrets
+import string
 
 
 class Database:
@@ -19,7 +21,9 @@ class Database:
                 username       TEXT,
                 full_name      TEXT,
                 created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
-                offer_accepted INTEGER DEFAULT 0
+                offer_accepted INTEGER DEFAULT 0,
+                referral_code  TEXT,
+                referrer_id    INTEGER
             )
             """
         )
@@ -89,7 +93,18 @@ class Database:
         )
 
         self.conn.commit()
+        self._ensure_users_columns()
         self._ensure_offers_columns()
+
+    def _ensure_users_columns(self):
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA table_info(users)")
+        columns = {row["name"] for row in cur.fetchall()}
+        if "referral_code" not in columns:
+            cur.execute("ALTER TABLE users ADD COLUMN referral_code TEXT")
+        if "referrer_id" not in columns:
+            cur.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
+        self.conn.commit()
 
     def _ensure_offers_columns(self):
         cur = self.conn.cursor()
@@ -108,8 +123,10 @@ class Database:
 
     # ===== USERS =====
 
-    async def add_user(self, user_id: int, username: Optional[str], full_name: str):
+    async def add_user(self, user_id: int, username: Optional[str], full_name: str) -> bool:
         cur = self.conn.cursor()
+        cur.execute("SELECT 1 FROM users WHERE user_id=?", (user_id,))
+        is_new = cur.fetchone() is None
         cur.execute(
             """
             INSERT INTO users (user_id, username, full_name)
@@ -121,6 +138,59 @@ class Database:
             (user_id, username, full_name),
         )
         self.conn.commit()
+        if is_new:
+            await self.ensure_referral_code(user_id)
+        return is_new
+
+    def _generate_referral_code(self, length: int = 8) -> str:
+        alphabet = string.ascii_letters + string.digits
+        return "".join(secrets.choice(alphabet) for _ in range(length))
+
+    async def ensure_referral_code(self, user_id: int) -> str:
+        cur = self.conn.cursor()
+        cur.execute("SELECT referral_code FROM users WHERE user_id=?", (user_id,))
+        row = cur.fetchone()
+        if row and row["referral_code"]:
+            return row["referral_code"]
+
+        code = self._generate_referral_code()
+        cur.execute("SELECT 1 FROM users WHERE referral_code=?", (code,))
+        while cur.fetchone() is not None:
+            code = self._generate_referral_code()
+            cur.execute("SELECT 1 FROM users WHERE referral_code=?", (code,))
+
+        cur.execute(
+            "UPDATE users SET referral_code=? WHERE user_id=?",
+            (code, user_id),
+        )
+        self.conn.commit()
+        return code
+
+    async def get_user_id_by_referral_code(self, code: str) -> Optional[int]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT user_id FROM users WHERE referral_code=?", (code,))
+        row = cur.fetchone()
+        return row["user_id"] if row else None
+
+    async def get_referrer_id(self, user_id: int) -> Optional[int]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT referrer_id FROM users WHERE user_id=?", (user_id,))
+        row = cur.fetchone()
+        return row["referrer_id"] if row else None
+
+    async def set_referrer(self, user_id: int, referrer_id: int):
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE users SET referrer_id=? WHERE user_id=?",
+            (referrer_id, user_id),
+        )
+        self.conn.commit()
+
+    async def get_referral_count(self, user_id: int) -> int:
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE referrer_id=?", (user_id,))
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
 
     async def is_offer_accepted(self, user_id: int) -> bool:
         cur = self.conn.cursor()
