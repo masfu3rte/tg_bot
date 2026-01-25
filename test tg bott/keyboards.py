@@ -44,14 +44,21 @@ class Keyboards:
         )
 
     @staticmethod
-    def my_requests_menu() -> ReplyKeyboardMarkup:
-        return ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Создать новый запрос")],
-                [KeyboardButton(text="Активные запросы")],
-                [KeyboardButton(text="Вернуться")],
-            ],
-            resize_keyboard=True,
+    def my_requests_menu() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Создать новый запрос", callback_data="requests:new"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="Активные запросы", callback_data="requests:active"
+                    )
+                ],
+                [InlineKeyboardButton(text="Вернуться", callback_data="requests:back")],
+            ]
         )
 
     @staticmethod

@@ -10,28 +10,32 @@ from utils import safe_username, build_direct_link
 
 
 def setup_requests_handlers(router: Router, db: Database, cfg: Config):
-    @router.message(F.text == "🧾 Мои запросы")
-    async def my_requests_entry(msg: Message):
+    async def send_my_requests_menu(chat_id: int, bot):
+        caption = (
+            "Снизу вы можете управлять и следить за вашими созданными запросами, а так же "
+            "создать новый запрос на поиск нужной вам вещи по лучшей цене."
+        )
         if cfg.ASSETS_CHANNEL_ID and cfg.MY_REQUESTS_BANNER_MESSAGE_ID:
             try:
-                await msg.bot.copy_message(
-                    chat_id=msg.chat.id,
+                await bot.copy_message(
+                    chat_id=chat_id,
                     from_chat_id=cfg.ASSETS_CHANNEL_ID,
                     message_id=cfg.MY_REQUESTS_BANNER_MESSAGE_ID,
-                    caption=(
-                        "Снизу вы можете управлять и следить за вашими созданными запросами, а так же "
-                        "создать новый запрос на поиск нужной вам вещи по лучшей цене."
-                    ),
+                    caption=caption,
                     reply_markup=Keyboards.my_requests_menu(),
                 )
                 return
             except Exception:
                 pass
-        await msg.answer(
-            "Снизу вы можете управлять и следить за вашими созданными запросами, а так же "
-            "создать новый запрос на поиск нужной вам вещи по лучшей цене.",
+        await bot.send_message(
+            chat_id=chat_id,
+            text=caption,
             reply_markup=Keyboards.my_requests_menu(),
         )
+
+    @router.message(F.text == "🧾 Мои запросы")
+    async def my_requests_entry(msg: Message):
+        await send_my_requests_menu(msg.chat.id, msg.bot)
 
     @router.message(F.text == "Вернуться")
     async def back_to_main(msg: Message):
@@ -48,6 +52,33 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
             return
         await state.set_state(RequestCreate.waiting_for_internal_title)
         await msg.answer("Укажите личное название запроса. Оно будет видно только вам.")
+
+    @router.callback_query(F.data == "requests:new")
+    async def new_request_start_inline(cq: CallbackQuery, state: FSMContext):
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+        if not await db.has_full_profile(cq.from_user.id):
+            await cq.message.answer(
+                "Перед созданием запроса заполните, пожалуйста, контактные данные CDEK "
+                "и реквизиты в разделе «Мой профиль»."
+            )
+            await cq.answer()
+            return
+        await state.set_state(RequestCreate.waiting_for_internal_title)
+        await cq.message.answer("Укажите личное название запроса. Оно будет видно только вам.")
+        await cq.answer()
+
+    @router.callback_query(F.data == "requests:back")
+    async def back_to_main_inline(cq: CallbackQuery):
+        from keyboards import Keyboards as K
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+        await cq.message.answer("Главное меню:", reply_markup=K.bottom_menu())
+        await cq.answer()
 
     @router.message(RequestCreate.waiting_for_internal_title)
     async def req_internal_title(msg: Message, state: FSMContext):

@@ -66,6 +66,21 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             return
         await send_request_card(msg, user_id, req)
 
+    @router.callback_query(F.data == "requests:active")
+    async def requests_slider_start_inline(cq: CallbackQuery):
+        user_id = cq.from_user.id
+        req = await db.get_first_active_request(user_id)
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+        if not req:
+            await cq.message.answer("Активных запросов нет.")
+            await cq.answer()
+            return
+        await send_request_card(cq.message, user_id, req)
+        await cq.answer()
+
     @router.callback_query(F.data.startswith("ur:prev:"))
     async def req_prev(cq: CallbackQuery):
         req_id = int(cq.data.split(":")[-1])
