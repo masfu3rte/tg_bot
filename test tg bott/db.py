@@ -81,21 +81,27 @@ class Database:
                 moderation_thread_id    INTEGER,
                 track_number            TEXT,
                 track_status            TEXT DEFAULT 'none',
-                final_payment_status    TEXT DEFAULT 'none'
+                final_payment_status    TEXT DEFAULT 'none',
+                manager_track_number    TEXT,
+                delivery_method         TEXT
             )
             """
         )
 
         self.conn.commit()
-        self._ensure_offers_thread_column()
+        self._ensure_offers_columns()
 
-    def _ensure_offers_thread_column(self):
+    def _ensure_offers_columns(self):
         cur = self.conn.cursor()
         cur.execute("PRAGMA table_info(offers)")
         columns = {row["name"] for row in cur.fetchall()}
         if "moderation_thread_id" not in columns:
             cur.execute("ALTER TABLE offers ADD COLUMN moderation_thread_id INTEGER")
-            self.conn.commit()
+        if "manager_track_number" not in columns:
+            cur.execute("ALTER TABLE offers ADD COLUMN manager_track_number TEXT")
+        if "delivery_method" not in columns:
+            cur.execute("ALTER TABLE offers ADD COLUMN delivery_method TEXT")
+        self.conn.commit()
 
     def _row_to_dict(self, row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
@@ -234,6 +240,16 @@ class Database:
             "cdek": cdek,
             "req": req,
         }
+
+    async def get_cdek_contacts(self, user_id: int) -> Optional[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM cdek_contacts WHERE user_id=?", (user_id,))
+        return self._row_to_dict(cur.fetchone())
+
+    async def get_requisites(self, user_id: int) -> Optional[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM requisites WHERE user_id=?", (user_id,))
+        return self._row_to_dict(cur.fetchone())
 
     # ===== REQUESTS =====
 
@@ -478,6 +494,22 @@ class Database:
         cur.execute(
             "UPDATE offers SET final_payment_status=? WHERE id=?",
             (status, offer_id),
+        )
+        self.conn.commit()
+
+    async def set_manager_track_number(self, offer_id: int, track_number: str):
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE offers SET manager_track_number=? WHERE id=?",
+            (track_number, offer_id),
+        )
+        self.conn.commit()
+
+    async def set_delivery_method(self, offer_id: int, method: str):
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE offers SET delivery_method=? WHERE id=?",
+            (method, offer_id),
         )
         self.conn.commit()
 

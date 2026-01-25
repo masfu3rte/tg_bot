@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from config import Config
 from db import Database
 from keyboards import Keyboards
-from states import OfferCreate, DealTrack
+from states import OfferCreate, DealTrack, DealArrivalPhoto, DealManagerTrack
 from utils import safe_username, build_request_link
 
 
@@ -347,6 +347,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         elif side == "seller":
             await db.set_seller_deposit_status(offer_id, "confirmed")
             target_id = offer["buyer_id"]
+        elif side == "final":
+            await db.set_final_payment_status(offer_id, "confirmed")
+            target_id = (await db.get_request(offer["request_id"]))["user_id"]
         else:
             await cq.answer("Неизвестная сторона.", show_alert=True)
             return
@@ -354,10 +357,44 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         try:
             await cq.bot.send_message(
                 chat_id=target_id,
-                text=f"Оплата залога ({side}) по сделке №{offer_id} подтверждена.",
+                text=(
+                    f"Оплата {'остатка' if side == 'final' else 'залога'} "
+                    f"({side}) по сделке №{offer_id} подтверждена."
+                ),
             )
         except Exception:
             pass
+
+        if side == "final":
+            base_price = offer["price_cents"] / 100.0
+            seller_deposit = base_price * 0.0535
+            total_to_send = base_price + seller_deposit
+            seller_req = await db.get_requisites(offer["buyer_id"]) or {}
+            seller_req_text = (
+                f"ФИО: {seller_req.get('fio') or '—'}\n"
+                f"Карта: {seller_req.get('card') or '—'}\n"
+                f"Банк: {seller_req.get('bank') or '—'}"
+            )
+            moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
+            manager_text = (
+                f"Финальная оплата подтверждена по сделке №{offer_id}.\n\n"
+                f"Сумма к отправке продавцу (с залогом): {total_to_send:.2f} руб.\n\n"
+                "Реквизиты продавца:\n"
+                f"{seller_req_text}"
+            )
+            if moderation_thread_id:
+                await cq.bot.send_message(
+                    chat_id=cfg.MODERATION_CHAT_ID,
+                    message_thread_id=moderation_thread_id,
+                    text=manager_text,
+                    reply_markup=Keyboards.deal_funds_sent_kb(offer_id),
+                )
+            else:
+                await cq.bot.send_message(
+                    chat_id=cfg.MODERATION_CHAT_ID,
+                    text=f"⚠️ Не удалось создать отдельный топик для сделки.\n\n{manager_text}",
+                    reply_markup=Keyboards.deal_funds_sent_kb(offer_id),
+                )
 
         offer = await db.get_offer(offer_id)
         if (
@@ -388,6 +425,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         elif side == "seller":
             await db.set_seller_deposit_status(offer_id, "rejected")
             target_id = offer["buyer_id"]
+        elif side == "final":
+            await db.set_final_payment_status(offer_id, "rejected")
+            target_id = (await db.get_request(offer["request_id"]))["user_id"]
         else:
             await cq.answer("Неизвестная сторона.", show_alert=True)
             return
@@ -395,8 +435,11 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         try:
             await cq.bot.send_message(
                 chat_id=target_id,
-                text=f"Оплата залога ({side}) по сделке №{offer_id} не прошла. "
-                     "Проверьте данные и попробуйте ещё раз.",
+                text=(
+                    f"Оплата {'остатка' if side == 'final' else 'залога'} "
+                    f"({side}) по сделке №{offer_id} не прошла. "
+                    "Проверьте данные и попробуйте ещё раз."
+                ),
             )
         except Exception:
             pass
@@ -438,13 +481,13 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                 chat_id=cfg.MODERATION_CHAT_ID,
                 message_thread_id=moderation_thread_id,
                 text=text,
-                reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, "track"),
+                reply_markup=Keyboards.deal_track_moderation_kb(offer_id),
             )
         else:
             await msg.bot.send_message(
                 chat_id=cfg.MODERATION_CHAT_ID,
                 text=f"⚠️ Не удалось создать отдельный топик для сделки.\n\n{text}",
-                reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, "track"),
+                reply_markup=Keyboards.deal_track_moderation_kb(offer_id),
             )
         await msg.answer("Трек-номер отправлен модератору на проверку.")
 
@@ -465,6 +508,25 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             )
         except Exception:
             pass
+
+        moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
+        arrival_text = (
+            f"Трек-номер по сделке №{offer_id} одобрен.\n"
+            "Проверьте товар и выберите действие."
+        )
+        if moderation_thread_id:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=moderation_thread_id,
+                text=arrival_text,
+                reply_markup=Keyboards.deal_arrival_moderation_kb(offer_id),
+            )
+        else:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                text=f"⚠️ Не удалось создать отдельный топик для сделки.\n\n{arrival_text}",
+                reply_markup=Keyboards.deal_arrival_moderation_kb(offer_id),
+            )
 
         try:
             await cq.message.edit_reply_markup(reply_markup=None)
@@ -497,6 +559,374 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             pass
 
         await cq.answer("Запросили новый трек.")
+
+    # ===== получение товара менеджером =====
+
+    @router.callback_query(F.data.startswith("deal:arrival_accept:"))
+    async def deal_arrival_accept(cq: CallbackQuery, state: FSMContext):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        await state.set_state(DealArrivalPhoto.waiting_for_photo)
+        await state.update_data(offer_id=offer_id)
+        await cq.message.answer(
+            f"Пришлите фото товара по сделке №{offer_id} одним сообщением.",
+        )
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await cq.answer()
+
+    @router.callback_query(F.data.startswith("deal:arrival_dispute:"))
+    async def deal_arrival_dispute(cq: CallbackQuery):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        await db.set_offer_status(offer_id, "dispute")
+        req = await db.get_request(offer["request_id"]) or {}
+        buyer_id = req.get("user_id")
+        seller_id = offer["buyer_id"]
+
+        dispute_text = (
+            f"По сделке №{offer_id} открыт спор. "
+            f"Свяжитесь с поддержкой: @{cfg.SUPPORT_USERNAME}."
+        )
+        for target_id in (buyer_id, seller_id):
+            if not target_id:
+                continue
+            try:
+                await cq.bot.send_message(chat_id=target_id, text=dispute_text)
+            except Exception:
+                pass
+
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await cq.answer("Спор открыт.")
+
+    @router.message(DealArrivalPhoto.waiting_for_photo, F.photo)
+    async def deal_arrival_photo(msg: Message, state: FSMContext):
+        data = await state.get_data()
+        offer_id = data.get("offer_id")
+        if not offer_id:
+            await state.clear()
+            await msg.answer("Не удалось определить сделку. Попробуйте ещё раз.")
+            return
+
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await state.clear()
+            await msg.answer("Сделка не найдена.")
+            return
+
+        req = await db.get_request(offer["request_id"]) or {}
+        buyer_id = req.get("user_id")
+        if not buyer_id:
+            await state.clear()
+            await msg.answer("Не удалось определить покупателя.")
+            return
+
+        photo = msg.photo[-1]
+        caption = (
+            f"Товар по сделке №{offer_id} прибыл.\n"
+            "Проверьте соответствие сделки и выберите действие."
+        )
+        try:
+            await msg.bot.send_photo(
+                chat_id=buyer_id,
+                photo=photo.file_id,
+                caption=caption,
+                reply_markup=Keyboards.deal_arrival_buyer_kb(offer_id),
+            )
+        except Exception:
+            pass
+
+        await state.clear()
+        await msg.answer("Фото отправлено покупателю.")
+
+    @router.callback_query(F.data.startswith("deal:buyer_accept:"))
+    async def deal_buyer_accept(cq: CallbackQuery):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        base_price = offer["price_cents"] / 100.0
+        buyer_total = base_price * 1.07
+        buyer_deposit = base_price * 0.2675
+        remainder = max(buyer_total - buyer_deposit, 0)
+
+        text = (
+            f"✅ Вы подтвердили получение товара по сделке №{offer_id}.\n\n"
+            f"Остаток к оплате: {remainder:.2f} руб.\n\n"
+            f"{cfg.MANAGER_REQUISITES_TEXT}\n\n"
+            f"Укажите в комментарии «№{offer_id}».\n\n"
+            "После оплаты нажмите кнопку «Оплатил остаток»."
+        )
+        try:
+            await cq.bot.send_message(
+                chat_id=cq.from_user.id,
+                text=text,
+                reply_markup=Keyboards.deal_final_paid_kb(offer_id),
+            )
+        except Exception:
+            pass
+
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await cq.answer("Отправили реквизиты.")
+
+    @router.callback_query(F.data.startswith("deal:buyer_dispute:"))
+    async def deal_buyer_dispute(cq: CallbackQuery):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        await db.set_offer_status(offer_id, "dispute")
+        moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
+        dispute_text = (
+            f"Покупатель открыл спор по сделке №{offer_id}.\n"
+            f"Покупатель: {safe_username(cq.from_user.username, cq.from_user.id)}"
+        )
+        if moderation_thread_id:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=moderation_thread_id,
+                text=dispute_text,
+            )
+        else:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                text=f"⚠️ Не удалось создать отдельный топик для сделки.\n\n{dispute_text}",
+            )
+
+        try:
+            await cq.bot.send_message(
+                chat_id=cq.from_user.id,
+                text=f"Спор по сделке №{offer_id} открыт. "
+                     f"Свяжитесь с поддержкой: @{cfg.SUPPORT_USERNAME}.",
+            )
+        except Exception:
+            pass
+
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await cq.answer("Спор открыт.")
+
+    # ===== финальная оплата покупателя =====
+
+    @router.callback_query(F.data.startswith("deal:final_paid:"))
+    async def deal_final_paid(cq: CallbackQuery):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        await db.set_final_payment_status(offer_id, "pending")
+        moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
+        text = f"Поступил запрос проверки финальной оплаты по сделке №{offer_id}."
+        if moderation_thread_id:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=moderation_thread_id,
+                text=text,
+                reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, "final"),
+            )
+        else:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                text=f"⚠️ Не удалось создать отдельный топик для сделки.\n\n{text}",
+                reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, "final"),
+            )
+
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await cq.answer("Запрос отправлен модератору.")
+
+    @router.callback_query(F.data.startswith("deal:funds_sent:"))
+    async def deal_funds_sent(cq: CallbackQuery):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        req = await db.get_request(offer["request_id"]) or {}
+        buyer_id = req.get("user_id")
+        seller_id = offer["buyer_id"]
+
+        try:
+            await cq.bot.send_message(
+                chat_id=seller_id,
+                text=f"Оплата за заказ №{offer_id} отправлена вместе с залогом по вашим реквизитам.",
+            )
+        except Exception:
+            pass
+
+        if buyer_id:
+            try:
+                await cq.bot.send_message(
+                    chat_id=buyer_id,
+                    text="Как хотите получить заказ?",
+                    reply_markup=Keyboards.deal_delivery_choice_kb(offer_id),
+                )
+            except Exception:
+                pass
+
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await cq.answer("Отметили отправку.")
+
+    @router.callback_query(F.data.startswith("deal:delivery:cdek:"))
+    async def deal_delivery_cdek(cq: CallbackQuery):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        await db.set_delivery_method(offer_id, "cdek")
+        cdek = await db.get_cdek_contacts(cq.from_user.id) or {}
+        cdek_text = (
+            f"Покупатель выбрал CDEK по сделке №{offer_id}.\n\n"
+            f"ФИО: {cdek.get('fio') or '—'}\n"
+            f"Телефон: {cdek.get('phone') or '—'}\n"
+            f"ПВЗ: {cdek.get('pvz') or '—'}\n"
+            f"Покупатель: {safe_username(cq.from_user.username, cq.from_user.id)}"
+        )
+        moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
+        if moderation_thread_id:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=moderation_thread_id,
+                text=cdek_text,
+                reply_markup=Keyboards.deal_cdek_sent_kb(offer_id),
+            )
+        else:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                text=f"⚠️ Не удалось создать отдельный топик для сделки.\n\n{cdek_text}",
+                reply_markup=Keyboards.deal_cdek_sent_kb(offer_id),
+            )
+
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await cq.answer("Выбор сохранён.")
+
+    @router.callback_query(F.data.startswith("deal:delivery:self:"))
+    async def deal_delivery_self(cq: CallbackQuery):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        await db.set_delivery_method(offer_id, "self")
+        moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
+        info_text = (
+            f"Покупатель выбрал самовывоз по сделке №{offer_id}.\n"
+            f"Покупатель: {safe_username(cq.from_user.username, cq.from_user.id)}"
+        )
+        if moderation_thread_id:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=moderation_thread_id,
+                text=info_text,
+            )
+        else:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                text=f"⚠️ Не удалось создать отдельный топик для сделки.\n\n{info_text}",
+            )
+
+        try:
+            await cq.bot.send_message(
+                chat_id=cq.from_user.id,
+                text="Скоро с вами свяжется менеджер для самовывоза.",
+            )
+        except Exception:
+            pass
+
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await cq.answer("Выбор сохранён.")
+
+    @router.callback_query(F.data.startswith("deal:cdek_sent:"))
+    async def deal_cdek_sent(cq: CallbackQuery, state: FSMContext):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        await state.set_state(DealManagerTrack.waiting_for_track)
+        await state.update_data(offer_id=offer_id)
+        await cq.message.answer(
+            f"Отправка по CDEK отмечена. Пришлите трек-код по сделке №{offer_id}.",
+        )
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await cq.answer()
+
+    @router.message(DealManagerTrack.waiting_for_track)
+    async def manager_track_send(msg: Message, state: FSMContext):
+        data = await state.get_data()
+        offer_id = data.get("offer_id")
+        if not offer_id:
+            await state.clear()
+            await msg.answer("Не удалось определить сделку.")
+            return
+
+        track = (msg.text or "").strip()
+        if not track:
+            await msg.answer("Отправьте трек-код текстом.")
+            return
+
+        await db.set_manager_track_number(offer_id, track)
+        offer = await db.get_offer(offer_id)
+        req = await db.get_request(offer["request_id"]) or {}
+        buyer_id = req.get("user_id")
+        if buyer_id:
+            try:
+                await msg.bot.send_message(
+                    chat_id=buyer_id,
+                    text=f"Ваш трек-код по сделке №{offer_id}: {track}",
+                )
+            except Exception:
+                pass
+
+        await state.clear()
+        await msg.answer("Трек-код отправлен покупателю.")
 
     # ===== закрытие сделки продавцом =====
 
