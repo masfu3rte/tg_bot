@@ -13,6 +13,7 @@ class Keyboards:
             keyboard=[
                 [KeyboardButton(text="🧾 Мои запросы")],
                 [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="📮 Мои отклики")],
+                [KeyboardButton(text="🤝 Рефералы")],
             ],
             resize_keyboard=True,
         )
