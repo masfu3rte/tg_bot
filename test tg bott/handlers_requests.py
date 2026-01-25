@@ -18,10 +18,20 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
                     chat_id=msg.chat.id,
                     from_chat_id=cfg.ASSETS_CHANNEL_ID,
                     message_id=cfg.MY_REQUESTS_BANNER_MESSAGE_ID,
+                    caption=(
+                        "Снизу вы можете управлять и следить за вашими созданными запросами, а так же "
+                        "создать новый запрос на поиск нужной вам вещи по лучшей цене."
+                    ),
+                    reply_markup=Keyboards.my_requests_menu(),
                 )
+                return
             except Exception:
                 pass
-        await msg.answer("Снизу вы можете управлять и следить за вашими созданными запросами, а так же создать новый запрос на поиск нужной вам вещи по лучшей цене.", reply_markup=Keyboards.my_requests_menu())
+        await msg.answer(
+            "Снизу вы можете управлять и следить за вашими созданными запросами, а так же "
+            "создать новый запрос на поиск нужной вам вещи по лучшей цене.",
+            reply_markup=Keyboards.my_requests_menu(),
+        )
 
     @router.message(F.text == "Вернуться")
     async def back_to_main(msg: Message):
