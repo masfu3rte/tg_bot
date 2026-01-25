@@ -44,6 +44,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             "Ваш профиль:",
             f"{username}",
             f"Дата регистрации: {profile['created_date']}",
+            f"Ваш рейтинг: {profile['rating']}",
             "",
             f"Создано запросов: {profile['requests_count']}",
             f"Сделано откликов: {profile['responses_count']}",
