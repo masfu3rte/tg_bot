@@ -12,131 +12,129 @@ class Database:
         self._create_tables()
 
     def _create_tables(self):
+        schemas = {
+            "users": [
+                ("user_id", "INTEGER PRIMARY KEY"),
+                ("username", "TEXT"),
+                ("full_name", "TEXT"),
+                ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+                ("offer_accepted", "INTEGER DEFAULT 0"),
+                ("referral_code", "TEXT"),
+                ("referrer_id", "INTEGER"),
+                ("rating_sum", "INTEGER DEFAULT 0"),
+                ("rating_count", "INTEGER DEFAULT 0"),
+            ],
+            "cdek_contacts": [
+                ("user_id", "INTEGER PRIMARY KEY"),
+                ("fio", "TEXT"),
+                ("phone", "TEXT"),
+                ("pvz", "TEXT"),
+            ],
+            "requisites": [
+                ("user_id", "INTEGER PRIMARY KEY"),
+                ("fio", "TEXT"),
+                ("card", "TEXT"),
+                ("bank", "TEXT"),
+            ],
+            "referral_balances": [
+                ("user_id", "INTEGER PRIMARY KEY"),
+                ("balance_cents", "INTEGER NOT NULL DEFAULT 0"),
+            ],
+            "referral_withdrawals": [
+                ("id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
+                ("user_id", "INTEGER NOT NULL"),
+                ("amount_cents", "INTEGER NOT NULL"),
+                ("status", "TEXT DEFAULT 'pending'"),
+                ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+            ],
+            "requests": [
+                ("id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
+                ("user_id", "INTEGER NOT NULL"),
+                ("internal_title", "TEXT"),
+                ("item_name", "TEXT"),
+                ("description", "TEXT"),
+                ("photo_file_id", "TEXT"),
+                ("status", "TEXT DEFAULT 'pending'"),
+                ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+                ("channel_message_id", "INTEGER"),
+                ("channel_is_photo", "INTEGER DEFAULT 0"),
+            ],
+            "offers": [
+                ("id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
+                ("request_id", "INTEGER NOT NULL"),
+                ("buyer_id", "INTEGER NOT NULL"),
+                ("price_cents", "INTEGER NOT NULL"),
+                ("days", "INTEGER NOT NULL"),
+                ("condition", "INTEGER NOT NULL"),
+                ("photo_file_id", "TEXT"),
+                ("status", "TEXT DEFAULT 'pending'"),
+                ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+                ("deal_status", "INTEGER DEFAULT 0"),
+                ("buyer_deposit_status", "TEXT DEFAULT 'none'"),
+                ("seller_deposit_status", "TEXT DEFAULT 'none'"),
+                ("moderation_thread_id", "INTEGER"),
+                ("track_number", "TEXT"),
+                ("track_status", "TEXT DEFAULT 'none'"),
+                ("final_payment_status", "TEXT DEFAULT 'none'"),
+                ("manager_track_number", "TEXT"),
+                ("delivery_method", "TEXT"),
+                ("seller_rating", "INTEGER"),
+            ],
+        }
+
+        for table_name, columns in schemas.items():
+            self._ensure_table_schema(table_name, columns)
+
+    def _ensure_table_schema(self, table_name: str, columns: list[tuple[str, str]]) -> None:
         cur = self.conn.cursor()
-
         cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                user_id        INTEGER PRIMARY KEY,
-                username       TEXT,
-                full_name      TEXT,
-                created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
-                offer_accepted INTEGER DEFAULT 0,
-                referral_code  TEXT,
-                referrer_id    INTEGER
-            )
-            """
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
         )
+        exists = cur.fetchone() is not None
+        column_defs = [f"{name} {definition}" for name, definition in columns]
+        if not exists:
+            cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(column_defs)})")
+            self.conn.commit()
+            return
 
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cdek_contacts (
-                user_id INTEGER PRIMARY KEY,
-                fio     TEXT,
-                phone   TEXT,
-                pvz     TEXT
-            )
-            """
-        )
+        cur.execute(f"PRAGMA table_info({table_name})")
+        existing_columns = [row["name"] for row in cur.fetchall()]
+        desired_columns = [name for name, _ in columns]
+        missing = [name for name in desired_columns if name not in existing_columns]
+        extra = [name for name in existing_columns if name not in desired_columns]
 
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS requisites (
-                user_id INTEGER PRIMARY KEY,
-                fio     TEXT,
-                card    TEXT,
-                bank    TEXT
-            )
-            """
-        )
+        if extra:
+            self._recreate_table(table_name, columns, existing_columns)
+            return
 
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS referral_balances (
-                user_id       INTEGER PRIMARY KEY,
-                balance_cents INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS referral_withdrawals (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id      INTEGER NOT NULL,
-                amount_cents INTEGER NOT NULL,
-                status       TEXT DEFAULT 'pending',
-                created_at   TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS requests (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id             INTEGER NOT NULL,
-                internal_title      TEXT,
-                item_name           TEXT,
-                description         TEXT,
-                photo_file_id       TEXT,
-                status              TEXT DEFAULT 'pending',
-                created_at          TEXT DEFAULT CURRENT_TIMESTAMP,
-                channel_message_id  INTEGER,
-                channel_is_photo    INTEGER DEFAULT 0
-            )
-            """
-        )
-
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS offers (
-                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_id              INTEGER NOT NULL,
-                buyer_id                INTEGER NOT NULL,
-                price_cents             INTEGER NOT NULL,
-                days                    INTEGER NOT NULL,
-                condition               INTEGER NOT NULL,
-                photo_file_id           TEXT,
-                status                  TEXT DEFAULT 'pending',
-                created_at              TEXT DEFAULT CURRENT_TIMESTAMP,
-                deal_status             INTEGER DEFAULT 0,
-                buyer_deposit_status    TEXT DEFAULT 'none',
-                seller_deposit_status   TEXT DEFAULT 'none',
-                moderation_thread_id    INTEGER,
-                track_number            TEXT,
-                track_status            TEXT DEFAULT 'none',
-                final_payment_status    TEXT DEFAULT 'none',
-                manager_track_number    TEXT,
-                delivery_method         TEXT
-            )
-            """
-        )
-
-        self.conn.commit()
-        self._ensure_users_columns()
-        self._ensure_offers_columns()
-
-    def _ensure_users_columns(self):
-        cur = self.conn.cursor()
-        cur.execute("PRAGMA table_info(users)")
-        columns = {row["name"] for row in cur.fetchall()}
-        if "referral_code" not in columns:
-            cur.execute("ALTER TABLE users ADD COLUMN referral_code TEXT")
-        if "referrer_id" not in columns:
-            cur.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
+        for name in missing:
+            definition = dict(columns)[name]
+            cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {name} {definition}")
         self.conn.commit()
 
-    def _ensure_offers_columns(self):
+    def _recreate_table(
+        self,
+        table_name: str,
+        columns: list[tuple[str, str]],
+        existing_columns: list[str],
+    ) -> None:
         cur = self.conn.cursor()
-        cur.execute("PRAGMA table_info(offers)")
-        columns = {row["name"] for row in cur.fetchall()}
-        if "moderation_thread_id" not in columns:
-            cur.execute("ALTER TABLE offers ADD COLUMN moderation_thread_id INTEGER")
-        if "manager_track_number" not in columns:
-            cur.execute("ALTER TABLE offers ADD COLUMN manager_track_number TEXT")
-        if "delivery_method" not in columns:
-            cur.execute("ALTER TABLE offers ADD COLUMN delivery_method TEXT")
+        temp_table = f"{table_name}_new"
+        column_defs = [f"{name} {definition}" for name, definition in columns]
+        cur.execute(f"DROP TABLE IF EXISTS {temp_table}")
+        cur.execute(f"CREATE TABLE {temp_table} ({', '.join(column_defs)})")
+
+        desired_columns = [name for name, _ in columns]
+        common_columns = [name for name in desired_columns if name in existing_columns]
+        if common_columns:
+            cols = ", ".join(common_columns)
+            cur.execute(
+                f"INSERT INTO {temp_table} ({cols}) SELECT {cols} FROM {table_name}"
+            )
+
+        cur.execute(f"DROP TABLE {table_name}")
+        cur.execute(f"ALTER TABLE {temp_table} RENAME TO {table_name}")
         self.conn.commit()
 
     def _row_to_dict(self, row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
@@ -371,6 +369,10 @@ class Database:
         cur.execute("SELECT * FROM requisites WHERE user_id=?", (user_id,))
         req = self._row_to_dict(cur.fetchone()) or {"fio": None, "card": None, "bank": None}
 
+        rating_sum = u["rating_sum"] if u and u["rating_sum"] is not None else 0
+        rating_count = u["rating_count"] if u and u["rating_count"] is not None else 0
+        rating_value = rating_sum / rating_count if rating_count else 0.0
+
         return {
             "user_id": user_id,
             "username": u["username"] if u else None,
@@ -378,6 +380,7 @@ class Database:
             "requests_count": requests_count,
             "responses_count": responses_count,
             "deals_sum": f"{deals_sum:.2f} руб.",
+            "rating": f"{rating_value:.2f}⭐",
             "cdek": cdek,
             "req": req,
         }
@@ -391,6 +394,27 @@ class Database:
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM requisites WHERE user_id=?", (user_id,))
         return self._row_to_dict(cur.fetchone())
+
+    async def add_user_rating(self, user_id: int, rating: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            UPDATE users
+            SET rating_sum = rating_sum + ?,
+                rating_count = rating_count + 1
+            WHERE user_id=?
+            """,
+            (rating, user_id),
+        )
+        self.conn.commit()
+
+    async def set_offer_seller_rating(self, offer_id: int, rating: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE offers SET seller_rating=? WHERE id=?",
+            (rating, offer_id),
+        )
+        self.conn.commit()
 
     # ===== REQUESTS =====
 

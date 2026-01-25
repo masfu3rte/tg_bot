@@ -397,6 +397,17 @@ class Keyboards:
         )
 
     @staticmethod
+    def deal_rating_kb(offer_id: int) -> InlineKeyboardMarkup:
+        stars = [
+            InlineKeyboardButton(
+                text=f"{rating}⭐",
+                callback_data=f"deal:rate:{offer_id}:{rating}",
+            )
+            for rating in range(1, 6)
+        ]
+        return InlineKeyboardMarkup(inline_keyboard=[stars])
+
+    @staticmethod
     def deal_status_menu_kb(
         offer_id: int, status_index: int, total: int
     ) -> InlineKeyboardMarkup:

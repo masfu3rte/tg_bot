@@ -976,6 +976,15 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                 )
             except Exception:
                 pass
+            if offer.get("seller_rating") is None:
+                try:
+                    await cq.bot.send_message(
+                        chat_id=buyer_id,
+                        text="Оцените продавца по завершённой сделке:",
+                        reply_markup=Keyboards.deal_rating_kb(offer_id),
+                    )
+                except Exception:
+                    pass
 
         try:
             await cq.message.edit_reply_markup(reply_markup=None)
@@ -983,6 +992,47 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             pass
 
         await cq.answer("Отметили отправку.")
+
+    @router.callback_query(F.data.startswith("deal:rate:"))
+    async def deal_rate_seller(cq: CallbackQuery):
+        _, _, offer_id_s, rating_s = cq.data.split(":")
+        offer_id = int(offer_id_s)
+        rating = int(rating_s)
+        if rating < 1 or rating > 5:
+            await cq.answer("Некорректная оценка.", show_alert=True)
+            return
+
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            await cq.answer("Сделка не найдена.", show_alert=True)
+            return
+
+        req = await db.get_request(offer["request_id"]) or {}
+        buyer_id = req.get("user_id")
+        seller_id = offer.get("buyer_id")
+        if cq.from_user.id != buyer_id:
+            await cq.answer("Оценить может только покупатель.", show_alert=True)
+            return
+        if offer.get("seller_rating") is not None:
+            await cq.answer("Оценка уже сохранена.", show_alert=True)
+            return
+
+        await db.set_offer_seller_rating(offer_id, rating)
+        if seller_id:
+            await db.add_user_rating(seller_id, rating)
+            try:
+                await cq.bot.send_message(
+                    chat_id=seller_id,
+                    text=f"Покупатель оценил вас на {rating}⭐ по сделке №{offer_id}.",
+                )
+            except Exception:
+                pass
+
+        try:
+            await cq.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await cq.answer("Спасибо за оценку!")
 
     @router.callback_query(F.data.startswith("deal:delivery:cdek:"))
     async def deal_delivery_cdek(cq: CallbackQuery):
