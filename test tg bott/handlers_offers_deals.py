@@ -58,7 +58,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         buyer_text = (
             "✅ Ваш отклик подтвержден, можно переходить к оплате.\n\n"
             f"{deal_text}\n\n"
-            f"Сумма товара: {base_price:.2f} руб.\n"
+            f"Сумма товара: {buyer_total:.2f} руб.\n"
             f"Ваш залог (25%): {buyer_deposit:.2f} руб.\n\n"
             f"{block}\n\n"
             f"{cfg.MANAGER_REQUISITES_TEXT}\n\n"
