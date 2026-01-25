@@ -127,8 +127,15 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, msg.bot)
 
+        req = await db.get_request(request_id)
+        link = build_request_link(cfg, req) if req else None
+        if link:
+            request_title = f'<a href="{link}">заявку №{request_id}</a>'
+        else:
+            request_title = f"заявку №{request_id}"
+
         text = (
-            f"Новый отклик #{offer_id} на заявку №{request_id}\n"
+            f"Новый отклик #{offer_id} на {request_title}\n"
             f"От: {safe_username(user.username, user.id)} (id {user.id})\n\n"
             f"Цена: {price:.2f} руб.\n"
             f"Срок доставки: {days} дн.\n"
