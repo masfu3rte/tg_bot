@@ -174,13 +174,16 @@ class Keyboards:
         )
 
     @staticmethod
-    def my_offers_menu() -> ReplyKeyboardMarkup:
-        return ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Активные отклики")],
-                [KeyboardButton(text="Вернуться")],
-            ],
-            resize_keyboard=True,
+    def my_offers_menu() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Активные отклики", callback_data="offers:active"
+                    )
+                ],
+                [InlineKeyboardButton(text="Вернуться", callback_data="offers:back")],
+            ]
         )
 
     @staticmethod
