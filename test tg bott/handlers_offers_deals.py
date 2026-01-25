@@ -110,6 +110,17 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             photo_file_id=photo.file_id,
         )
 
+        moderation_thread_id = None
+        try:
+            topic = await msg.bot.create_forum_topic(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                name=f"Сделка №{offer_id}",
+            )
+            moderation_thread_id = topic.message_thread_id
+            await db.set_offer_moderation_thread_id(offer_id, moderation_thread_id)
+        except Exception:
+            moderation_thread_id = cfg.MODERATION_TOPIC_ID
+
         text = (
             f"Новый отклик #{offer_id} на заявку №{request_id}\n"
             f"От: {safe_username(user.username, user.id)} (id {user.id})\n\n"
@@ -120,7 +131,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         await msg.bot.send_photo(
             chat_id=cfg.MODERATION_CHAT_ID,
-            message_thread_id=cfg.MODERATION_TOPIC_ID,
+            message_thread_id=moderation_thread_id,
             photo=photo.file_id,
             caption=text,
             reply_markup=Keyboards.offer_moderation_kb(offer_id),
@@ -272,6 +283,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             await cq.answer("Сделка не найдена.", show_alert=True)
             return
 
+        moderation_thread_id = offer.get("moderation_thread_id") or cfg.MODERATION_TOPIC_ID
         if side == "buyer":
             await db.set_buyer_deposit_status(offer_id, "pending")
         elif side == "seller":
@@ -283,7 +295,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         )
         await cq.bot.send_message(
             chat_id=cfg.MODERATION_CHAT_ID,
-            message_thread_id=cfg.MODERATION_TOPIC_ID,
+            message_thread_id=moderation_thread_id,
             text=text,
             reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, side),
         )
@@ -385,13 +397,14 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             await msg.answer("Сделка не найдена.")
             return
 
+        moderation_thread_id = offer.get("moderation_thread_id") or cfg.MODERATION_TOPIC_ID
         text = (
             f"Продавец указал трек-номер по сделке №{offer_id}:\n"
             f"{track}"
         )
         await msg.bot.send_message(
             chat_id=cfg.MODERATION_CHAT_ID,
-            message_thread_id=cfg.MODERATION_TOPIC_ID,
+            message_thread_id=moderation_thread_id,
             text=text,
             reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, "track"),
         )
