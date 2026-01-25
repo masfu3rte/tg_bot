@@ -77,6 +77,18 @@ class Keyboards:
         )
 
     @staticmethod
+    def referral_withdraw_kb() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="💸 Вывести средства", callback_data="referral:withdraw"
+                    )
+                ]
+            ]
+        )
+
+    @staticmethod
     def moderation_request_kb(request_id: int) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[

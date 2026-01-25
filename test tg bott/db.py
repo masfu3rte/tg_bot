@@ -52,6 +52,27 @@ class Database:
 
         cur.execute(
             """
+            CREATE TABLE IF NOT EXISTS referral_balances (
+                user_id       INTEGER PRIMARY KEY,
+                balance_cents INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS referral_withdrawals (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER NOT NULL,
+                amount_cents INTEGER NOT NULL,
+                status       TEXT DEFAULT 'pending',
+                created_at   TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS requests (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id             INTEGER NOT NULL,
@@ -191,6 +212,56 @@ class Database:
         cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE referrer_id=?", (user_id,))
         row = cur.fetchone()
         return row["cnt"] if row else 0
+
+    async def get_referral_balance_cents(self, user_id: int) -> int:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT balance_cents FROM referral_balances WHERE user_id=?",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        return row["balance_cents"] if row else 0
+
+    async def add_referral_bonus(self, user_id: int, amount_cents: int):
+        if amount_cents <= 0:
+            return
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO referral_balances (user_id, balance_cents)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                balance_cents=balance_cents + excluded.balance_cents
+            """,
+            (user_id, amount_cents),
+        )
+        self.conn.commit()
+
+    async def request_referral_withdrawal(self, user_id: int, amount_cents: int) -> bool:
+        if amount_cents <= 0:
+            return False
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT balance_cents FROM referral_balances WHERE user_id=?",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        balance = row["balance_cents"] if row else 0
+        if balance < amount_cents:
+            return False
+        cur.execute(
+            "UPDATE referral_balances SET balance_cents=? WHERE user_id=?",
+            (balance - amount_cents, user_id),
+        )
+        cur.execute(
+            """
+            INSERT INTO referral_withdrawals (user_id, amount_cents)
+            VALUES (?, ?)
+            """,
+            (user_id, amount_cents),
+        )
+        self.conn.commit()
+        return True
 
     async def is_offer_accepted(self, user_id: int) -> bool:
         cur = self.conn.cursor()
