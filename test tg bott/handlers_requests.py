@@ -70,7 +70,7 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
             reply_markup=Keyboards.new_request_skip_photo_kb(),
         )
 
-    @router.message(RequestCreate.waiting_for_photo)
+    @router.message(RequestCreate.waiting_for_photo, ~F.photo)
     async def req_photo_nonphoto(msg: Message, state: FSMContext):
         # если прилетит не фото — повторяем просьбу
         await msg.answer(
