@@ -28,3 +28,11 @@ class OfferCreate(StatesGroup):
 
 class DealTrack(StatesGroup):
     waiting_for_track = State()
+
+
+class DealArrivalPhoto(StatesGroup):
+    waiting_for_photo = State()
+
+
+class DealManagerTrack(StatesGroup):
+    waiting_for_track = State()

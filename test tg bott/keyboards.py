@@ -221,6 +221,113 @@ class Keyboards:
         )
 
     @staticmethod
+    def deal_track_moderation_kb(offer_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔘 Трек принят",
+                        callback_data=f"deal:confirm:track:{offer_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="🔘 Трек не принят",
+                        callback_data=f"deal:cancel:track:{offer_id}",
+                    ),
+                ]
+            ]
+        )
+
+    @staticmethod
+    def deal_arrival_moderation_kb(offer_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔘 Принять",
+                        callback_data=f"deal:arrival_accept:{offer_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="🔘 Открыть спор",
+                        callback_data=f"deal:arrival_dispute:{offer_id}",
+                    ),
+                ]
+            ]
+        )
+
+    @staticmethod
+    def deal_arrival_buyer_kb(offer_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔘 Принять",
+                        callback_data=f"deal:buyer_accept:{offer_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="🔘 Открыть спор",
+                        callback_data=f"deal:buyer_dispute:{offer_id}",
+                    ),
+                ]
+            ]
+        )
+
+    @staticmethod
+    def deal_final_paid_kb(offer_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔘 Оплатил остаток",
+                        callback_data=f"deal:final_paid:{offer_id}",
+                    )
+                ]
+            ]
+        )
+
+    @staticmethod
+    def deal_funds_sent_kb(offer_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔘 Деньги отправлены",
+                        callback_data=f"deal:funds_sent:{offer_id}",
+                    )
+                ]
+            ]
+        )
+
+    @staticmethod
+    def deal_delivery_choice_kb(offer_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔘 CDEK",
+                        callback_data=f"deal:delivery:cdek:{offer_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="🔘 Самовывоз Москва",
+                        callback_data=f"deal:delivery:self:{offer_id}",
+                    ),
+                ]
+            ]
+        )
+
+    @staticmethod
+    def deal_cdek_sent_kb(offer_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔘 Отправил",
+                        callback_data=f"deal:cdek_sent:{offer_id}",
+                    )
+                ]
+            ]
+        )
+
+    @staticmethod
     def deal_status_menu_kb(
         offer_id: int, status_index: int, total: int
     ) -> InlineKeyboardMarkup:
