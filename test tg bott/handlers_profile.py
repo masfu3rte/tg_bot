@@ -179,17 +179,69 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         )
         await cq.answer()
 
+    async def handle_profile_exit(msg: Message, state: FSMContext) -> bool:
+        text = (msg.text or "").strip()
+        if text == "👤 Мой профиль":
+            await state.clear()
+            await send_profile(msg)
+            return True
+        if text == "🧾 Мои запросы":
+            await state.clear()
+            caption = (
+                "Снизу вы можете управлять и следить за вашими созданными запросами, а так же "
+                "создать новый запрос на поиск нужной вам вещи по лучшей цене."
+            )
+            if cfg.ASSETS_CHANNEL_ID and cfg.MY_REQUESTS_BANNER_MESSAGE_ID:
+                try:
+                    await msg.bot.copy_message(
+                        chat_id=msg.chat.id,
+                        from_chat_id=cfg.ASSETS_CHANNEL_ID,
+                        message_id=cfg.MY_REQUESTS_BANNER_MESSAGE_ID,
+                        caption=caption,
+                        reply_markup=Keyboards.my_requests_menu(),
+                    )
+                    return True
+                except Exception:
+                    pass
+            await msg.answer(caption, reply_markup=Keyboards.my_requests_menu())
+            return True
+        if text == "📮 Мои отклики":
+            await state.clear()
+            caption = "Раздел «Мои отклики»."
+            if cfg.ASSETS_CHANNEL_ID and cfg.MY_OFFERS_BANNER_MESSAGE_ID:
+                try:
+                    await msg.bot.copy_message(
+                        chat_id=msg.chat.id,
+                        from_chat_id=cfg.ASSETS_CHANNEL_ID,
+                        message_id=cfg.MY_OFFERS_BANNER_MESSAGE_ID,
+                        caption=caption,
+                        reply_markup=Keyboards.my_offers_menu(),
+                    )
+                    return True
+                except Exception:
+                    pass
+            await msg.answer(caption, reply_markup=Keyboards.my_offers_menu())
+            return True
+        if text == "Вернуться":
+            await state.clear()
+            await msg.answer("Главное меню:", reply_markup=Keyboards.bottom_menu())
+            return True
+        return False
+
     @router.callback_query(F.data == "profile:back")
-    async def profile_back(cq: CallbackQuery):
+    async def profile_back(cq: CallbackQuery, state: FSMContext):
         try:
             await cq.message.delete()
         except Exception:
             pass
+        await state.clear()
         await send_profile_to(cq.from_user.id, cq.message.chat.id, cq.bot)
         await cq.answer()
 
     @router.message(ProfileEdit.waiting_for_cdek_form)
     async def save_cdek(msg: Message, state: FSMContext):
+        if await handle_profile_exit(msg, state):
+            return
         parts = [p.strip() for p in (msg.text or "").splitlines() if p.strip()]
         if len(parts) != 3:
             await msg.answer("Нужно три строки: ФИО, телефон, адрес ПВЗ.")
@@ -202,6 +254,8 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
 
     @router.message(ProfileEdit.waiting_for_req_form)
     async def save_req(msg: Message, state: FSMContext):
+        if await handle_profile_exit(msg, state):
+            return
         parts = [p.strip() for p in (msg.text or "").splitlines() if p.strip()]
         if len(parts) != 3:
             await msg.answer("Нужно три строки: ФИО, номер карты, банк.")
