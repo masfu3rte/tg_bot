@@ -461,9 +461,17 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         elif side == "seller":
             await db.set_seller_deposit_status(offer_id, "pending")
 
+        base_price = offer["price_cents"] / 100.0
+        buyer_total = base_price * 1.07
+        seller_deposit = base_price * 0.0535
+        buyer_deposit = base_price * 0.2675
+        amount = buyer_deposit if side == "buyer" else seller_deposit
+
         text = (
             f"Поступил запрос проверки оплаты залога от стороны: {side}\n"
-            f"Сделка #{offer_id}, заявка №{offer['request_id']}."
+            f"Сделка #{offer_id}, заявка №{offer['request_id']}.\n"
+            f"Сумма залога к оплате: {amount:.2f} руб.\n"
+            f"Сумма товара: {buyer_total:.2f} руб."
         )
         if moderation_thread_id:
             await cq.bot.send_message(
@@ -898,8 +906,15 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             return
 
         await db.set_final_payment_status(offer_id, "pending")
+        base_price = offer["price_cents"] / 100.0
+        buyer_total = base_price * 1.07
+        buyer_deposit = base_price * 0.2675
+        remainder = max(buyer_total - buyer_deposit, 0)
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
-        text = f"Поступил запрос проверки финальной оплаты по сделке №{offer_id}."
+        text = (
+            f"Поступил запрос проверки финальной оплаты по сделке №{offer_id}.\n"
+            f"Сумма к оплате: {remainder:.2f} руб."
+        )
         if moderation_thread_id:
             await cq.bot.send_message(
                 chat_id=cfg.MODERATION_CHAT_ID,
