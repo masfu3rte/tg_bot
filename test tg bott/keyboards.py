@@ -13,7 +13,6 @@ class Keyboards:
             keyboard=[
                 [KeyboardButton(text="🧾 Мои запросы")],
                 [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="📮 Мои отклики")],
-                [KeyboardButton(text="🤝 Рефералы")],
             ],
             resize_keyboard=True,
         )
@@ -73,6 +72,7 @@ class Keyboards:
                     )
                 ],
                 [InlineKeyboardButton(text="✏️ Реквизиты", callback_data="profile:req")],
+                [InlineKeyboardButton(text="🤝 Рефералы", callback_data="profile:referrals")],
             ]
         )
 
