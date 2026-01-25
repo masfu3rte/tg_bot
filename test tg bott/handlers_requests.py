@@ -106,20 +106,22 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
             reply_markup=Keyboards.moderation_request_kb(request_id),
         )
 
+        confirmation_text = (
+            "Ваш запрос отправлен на модерацию. После проверки он будет опубликован в канале."
+        )
+
         if cfg.ASSETS_CHANNEL_ID and cfg.REQUEST_SENT_BANNER_MESSAGE_ID:
             try:
                 await cq.bot.copy_message(
                     chat_id=user.id,
                     from_chat_id=cfg.ASSETS_CHANNEL_ID,
                     message_id=cfg.REQUEST_SENT_BANNER_MESSAGE_ID,
+                    caption=confirmation_text,
                 )
             except Exception:
-                pass
-
-        await cq.bot.send_message(
-            chat_id=user.id,
-            text="Ваш запрос отправлен на модерацию. После проверки он будет опубликован в канале.",
-        )
+                await cq.bot.send_message(chat_id=user.id, text=confirmation_text)
+        else:
+            await cq.bot.send_message(chat_id=user.id, text=confirmation_text)
         await cq.answer()
 
     @router.message(RequestCreate.waiting_for_photo, F.photo)
@@ -153,19 +155,22 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
             reply_markup=Keyboards.moderation_request_kb(request_id),
         )
 
+        confirmation_text = (
+            "Ваш запрос отправлен на модерацию. После проверки он будет опубликован в канале."
+        )
+
         if cfg.ASSETS_CHANNEL_ID and cfg.REQUEST_SENT_BANNER_MESSAGE_ID:
             try:
                 await msg.bot.copy_message(
                     chat_id=user.id,
                     from_chat_id=cfg.ASSETS_CHANNEL_ID,
                     message_id=cfg.REQUEST_SENT_BANNER_MESSAGE_ID,
+                    caption=confirmation_text,
                 )
             except Exception:
-                pass
-
-        await msg.answer(
-            "Ваш запрос отправлен на модерацию. После проверки он будет опубликован в канале."
-        )
+                await msg.answer(confirmation_text)
+        else:
+            await msg.answer(confirmation_text)
 
     # ===== модерация запросов =====
 
