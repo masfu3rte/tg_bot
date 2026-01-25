@@ -66,6 +66,21 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             return
         await send_request_card(msg, user_id, req)
 
+    @router.callback_query(F.data == "requests:active")
+    async def requests_slider_start_inline(cq: CallbackQuery):
+        user_id = cq.from_user.id
+        req = await db.get_first_active_request(user_id)
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+        if not req:
+            await cq.message.answer("Активных запросов нет.")
+            await cq.answer()
+            return
+        await send_request_card(cq.message, user_id, req)
+        await cq.answer()
+
     @router.callback_query(F.data.startswith("ur:prev:"))
     async def req_prev(cq: CallbackQuery):
         req_id = int(cq.data.split(":")[-1])
@@ -144,13 +159,12 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
 
     # ===== «Мои отклики» (с баннером id=5) =====
 
-    @router.message(F.text == "📮 Мои отклики")
-    async def my_offers_entry(msg: Message):
+    async def send_my_offers_menu(chat_id: int, bot):
         text = "Раздел «Мои отклики»."
         if cfg.ASSETS_CHANNEL_ID and cfg.MY_OFFERS_BANNER_MESSAGE_ID:
             try:
-                await msg.bot.copy_message(
-                    chat_id=msg.chat.id,
+                await bot.copy_message(
+                    chat_id=chat_id,
                     from_chat_id=cfg.ASSETS_CHANNEL_ID,
                     message_id=cfg.MY_OFFERS_BANNER_MESSAGE_ID,
                     caption=text,
@@ -159,7 +173,15 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
                 return
             except Exception:
                 pass
-        await msg.answer(text, reply_markup=Keyboards.my_offers_menu())
+        await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=Keyboards.my_offers_menu(),
+        )
+
+    @router.message(F.text == "📮 Мои отклики")
+    async def my_offers_entry(msg: Message):
+        await send_my_offers_menu(msg.chat.id, msg.bot)
 
     # ===== Слайдер «Активные отклики» =====
 
@@ -204,6 +226,31 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             await msg.answer("Откликов нет.")
             return
         await send_offer_card(msg, user_id, offer)
+
+    @router.callback_query(F.data == "offers:active")
+    async def offers_slider_start_inline(cq: CallbackQuery):
+        user_id = cq.from_user.id
+        offer = await db.get_first_offer_for_user(user_id)
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+        if not offer:
+            await cq.message.answer("Откликов нет.")
+            await cq.answer()
+            return
+        await send_offer_card(cq.message, user_id, offer)
+        await cq.answer()
+
+    @router.callback_query(F.data == "offers:back")
+    async def offers_back_inline(cq: CallbackQuery):
+        from keyboards import Keyboards as K
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+        await cq.message.answer("Главное меню:", reply_markup=K.bottom_menu())
+        await cq.answer()
 
     @router.callback_query(F.data.startswith("uo:prev:"))
     async def offer_prev(cq: CallbackQuery):
