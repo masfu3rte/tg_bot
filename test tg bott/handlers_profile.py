@@ -10,6 +10,26 @@ from utils import safe_username
 
 
 def setup_profile_handlers(router: Router, db: Database, cfg: Config):
+    async def build_referral_text(user_id: int, bot) -> str:
+        code = await db.ensure_referral_code(user_id)
+        count = await db.get_referral_count(user_id)
+        balance_cents = await db.get_referral_balance_cents(user_id)
+        balance = balance_cents / 100.0
+
+        bot_info = await bot.get_me()
+        bot_username = bot_info.username or ""
+        link = f"https://t.me/{bot_username}?start=ref_{code}" if bot_username else code
+
+        text_lines = [
+            "Ваша реферальная статистика:",
+            f"Приглашено пользователей: {count}",
+            f"Доход с комиссии: {balance:.2f} руб.",
+            "",
+            "Ваша реферальная ссылка:",
+            link,
+        ]
+        return "\n".join(text_lines)
+
     async def send_profile(msg: Message):
         user_id = msg.from_user.id
         profile = await db.get_profile_view(user_id)
@@ -60,21 +80,57 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
     @router.message(F.text == "🤝 Рефералы")
     async def my_referrals(msg: Message):
         user_id = msg.from_user.id
-        code = await db.ensure_referral_code(user_id)
-        count = await db.get_referral_count(user_id)
+        text = await build_referral_text(user_id, msg.bot)
+        await msg.answer(text, reply_markup=Keyboards.referral_withdraw_kb())
 
-        bot = await msg.bot.get_me()
-        bot_username = bot.username or ""
-        link = f"https://t.me/{bot_username}?start=ref_{code}" if bot_username else code
+    @router.callback_query(F.data == "referral:withdraw")
+    async def referral_withdraw(cq: CallbackQuery):
+        user_id = cq.from_user.id
+        balance_cents = await db.get_referral_balance_cents(user_id)
+        if balance_cents <= 0:
+            await cq.answer("Нет доступных средств для вывода.", show_alert=True)
+            return
 
-        text_lines = [
-            "Ваша реферальная статистика:",
-            f"Приглашено пользователей: {count}",
-            "",
-            "Ваша реферальная ссылка:",
-            link,
-        ]
-        await msg.answer("\n".join(text_lines))
+        if not await db.request_referral_withdrawal(user_id, balance_cents):
+            await cq.answer("Не удалось оформить вывод, попробуйте позже.", show_alert=True)
+            return
+
+        amount = balance_cents / 100.0
+        req = await db.get_requisites(user_id) or {}
+        req_text = (
+            f"ФИО: {req.get('fio') or '—'}\n"
+            f"Карта: {req.get('card') or '—'}\n"
+            f"Банк: {req.get('bank') or '—'}"
+        )
+        request_text = (
+            "Запрос на вывод реферальных средств.\n"
+            f"Пользователь: {safe_username(cq.from_user.username, user_id)} (id {user_id})\n"
+            f"Сумма: {amount:.2f} руб.\n\n"
+            "Реквизиты:\n"
+            f"{req_text}"
+        )
+        try:
+            topic = await cq.bot.create_forum_topic(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                name=f"Реферальный вывод #{user_id}",
+            )
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=topic.message_thread_id,
+                text=request_text,
+            )
+        except Exception:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                text=f"⚠️ Не удалось создать отдельный топик.\n\n{request_text}",
+            )
+
+        text = await build_referral_text(user_id, cq.bot)
+        try:
+            await cq.message.edit_text(text, reply_markup=Keyboards.referral_withdraw_kb())
+        except Exception:
+            await cq.message.answer(text, reply_markup=Keyboards.referral_withdraw_kb())
+        await cq.answer("Запрос на вывод отправлен модератору.")
 
     @router.callback_query(F.data == "profile:cdek")
     async def edit_cdek(cq: CallbackQuery, state: FSMContext):

@@ -500,30 +500,42 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         if not offer:
             await cq.answer("Сделка не найдена.", show_alert=True)
             return
+        final_status_before = offer["final_payment_status"]
 
+        req = None
         if side == "buyer":
             await db.set_buyer_deposit_status(offer_id, "confirmed")
-            target_id = (await db.get_request(offer["request_id"]))["user_id"]
+            req = await db.get_request(offer["request_id"])
+            target_id = req["user_id"] if req else None
         elif side == "seller":
             await db.set_seller_deposit_status(offer_id, "confirmed")
             target_id = offer["buyer_id"]
         elif side == "final":
             await db.set_final_payment_status(offer_id, "confirmed")
-            target_id = (await db.get_request(offer["request_id"]))["user_id"]
+            req = await db.get_request(offer["request_id"])
+            target_id = req["user_id"] if req else None
+
+            if final_status_before != "confirmed" and req:
+                referrer_id = await db.get_referrer_id(req["user_id"])
+                if referrer_id:
+                    commission_cents = int(round(offer["price_cents"] * 7 / 100))
+                    bonus_cents = int(round(commission_cents * 10 / 100))
+                    await db.add_referral_bonus(referrer_id, bonus_cents)
         else:
             await cq.answer("Неизвестная сторона.", show_alert=True)
             return
 
-        try:
-            await cq.bot.send_message(
-                chat_id=target_id,
-                text=(
-                    f"Оплата {'остатка' if side == 'final' else 'залога'} "
-                    f"({side}) по сделке №{offer_id} подтверждена."
-                ),
-            )
-        except Exception:
-            pass
+        if target_id:
+            try:
+                await cq.bot.send_message(
+                    chat_id=target_id,
+                    text=(
+                        f"Оплата {'остатка' if side == 'final' else 'залога'} "
+                        f"({side}) по сделке №{offer_id} подтверждена."
+                    ),
+                )
+            except Exception:
+                pass
 
         if side == "final":
             base_price = offer["price_cents"] / 100.0
