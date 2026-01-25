@@ -23,6 +23,7 @@ class Config:
     MY_REQUESTS_BANNER_MESSAGE_ID: Optional[int]
     REQUEST_SENT_BANNER_MESSAGE_ID: Optional[int]
     MY_OFFERS_BANNER_MESSAGE_ID: Optional[int]
+    START_BANNER_ID: Optional[int]
 
     MANAGER_REQUISITES_TEXT: str
     MANAGER_CDEK_CONTACT_TEXT: str
@@ -55,6 +56,7 @@ def load_config() -> Config:
         MY_REQUESTS_BANNER_MESSAGE_ID=2,
         REQUEST_SENT_BANNER_MESSAGE_ID=3,
         MY_OFFERS_BANNER_MESSAGE_ID=5,  # <- по твоей просьбе
+        START_BANNER_ID=6,
 
         MANAGER_REQUISITES_TEXT=(
             "Реквизиты менеджера для оплаты залога:\n"

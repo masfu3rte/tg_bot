@@ -17,12 +17,12 @@ WELCOME_TEXT = (
 
 def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
     async def send_welcome_message(msg: Message):
-        if cfg.ASSETS_CHANNEL_ID and cfg.MY_OFFERS_BANNER_MESSAGE_ID:
+        if cfg.ASSETS_CHANNEL_ID and cfg.START_BANNER_ID:
             try:
                 await msg.bot.copy_message(
                     chat_id=msg.chat.id,
                     from_chat_id=cfg.ASSETS_CHANNEL_ID,
-                    message_id=cfg.MY_OFFERS_BANNER_MESSAGE_ID,
+                    message_id=cfg.START_BANNER_ID,
                     caption=WELCOME_TEXT,
                     reply_markup=Keyboards.bottom_menu(),
                 )
