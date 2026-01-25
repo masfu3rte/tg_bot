@@ -36,8 +36,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         ]
         return "\n".join(text_lines)
 
-    async def send_profile(msg: Message):
-        user_id = msg.from_user.id
+    async def send_profile_to(user_id: int, chat_id: int, bot):
         profile = await db.get_profile_view(user_id)
         username = safe_username(profile["username"], profile["user_id"])
 
@@ -65,8 +64,8 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         # Одно сообщение: копируем баннер и в caption кладём текст + прикручиваем инлайн-кнопки
         if cfg.ASSETS_CHANNEL_ID and cfg.PROFILE_BANNER_MESSAGE_ID:
             try:
-                await msg.bot.copy_message(
-                    chat_id=msg.chat.id,
+                await bot.copy_message(
+                    chat_id=chat_id,
                     from_chat_id=cfg.ASSETS_CHANNEL_ID,
                     message_id=cfg.PROFILE_BANNER_MESSAGE_ID,
                     caption=text,
@@ -77,7 +76,10 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
                 pass
 
         # fallback: просто текст + кнопки
-        await msg.answer(text, reply_markup=Keyboards.profile_menu_inline())
+        await bot.send_message(chat_id=chat_id, text=text, reply_markup=Keyboards.profile_menu_inline())
+
+    async def send_profile(msg: Message):
+        await send_profile_to(msg.from_user.id, msg.chat.id, msg.bot)
 
     @router.message(F.text == "👤 Мой профиль")
     async def my_profile(msg: Message):
@@ -94,9 +96,10 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         user_id = cq.from_user.id
         text = await build_referral_text(user_id, cq.bot)
         try:
-            await cq.message.edit_text(text, reply_markup=Keyboards.referral_withdraw_kb())
+            await cq.message.delete()
         except Exception:
-            await cq.message.answer(text, reply_markup=Keyboards.referral_withdraw_kb())
+            pass
+        await cq.message.answer(text, reply_markup=Keyboards.referral_withdraw_back_kb())
         await cq.answer()
 
     @router.callback_query(F.data == "referral:withdraw")
@@ -143,27 +146,46 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
 
         text = await build_referral_text(user_id, cq.bot)
         try:
-            await cq.message.edit_text(text, reply_markup=Keyboards.referral_withdraw_kb())
+            await cq.message.edit_text(text, reply_markup=Keyboards.referral_withdraw_back_kb())
         except Exception:
-            await cq.message.answer(text, reply_markup=Keyboards.referral_withdraw_kb())
+            await cq.message.answer(text, reply_markup=Keyboards.referral_withdraw_back_kb())
         await cq.answer("Запрос на вывод отправлен модератору.")
 
     @router.callback_query(F.data == "profile:cdek")
     async def edit_cdek(cq: CallbackQuery, state: FSMContext):
         await state.set_state(ProfileEdit.waiting_for_cdek_form)
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
         await cq.message.answer(
             "Отправьте контактные данные CDEK тремя строками в формате:\n"
-            "<b>ФИО\nтелефон\nадрес ПВЗ</b>"
+            "<b>ФИО\nтелефон\nадрес ПВЗ</b>",
+            reply_markup=Keyboards.profile_back_inline(),
         )
         await cq.answer()
 
     @router.callback_query(F.data == "profile:req")
     async def edit_req(cq: CallbackQuery, state: FSMContext):
         await state.set_state(ProfileEdit.waiting_for_req_form)
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
         await cq.message.answer(
             "Отправьте реквизиты тремя строками в формате:\n"
-            "<b>ФИО\nномер карты\nбанк</b>"
+            "<b>ФИО\nномер карты\nбанк</b>",
+            reply_markup=Keyboards.profile_back_inline(),
         )
+        await cq.answer()
+
+    @router.callback_query(F.data == "profile:back")
+    async def profile_back(cq: CallbackQuery):
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+        await send_profile_to(cq.from_user.id, cq.message.chat.id, cq.bot)
         await cq.answer()
 
     @router.message(ProfileEdit.waiting_for_cdek_form)

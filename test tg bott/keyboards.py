@@ -89,6 +89,35 @@ class Keyboards:
         )
 
     @staticmethod
+    def referral_withdraw_back_kb() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="💸 Вывести средства", callback_data="referral:withdraw"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="↩️ Вернуться в профиль", callback_data="profile:back"
+                    )
+                ],
+            ]
+        )
+
+    @staticmethod
+    def profile_back_inline() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="↩️ Вернуться в профиль", callback_data="profile:back"
+                    )
+                ]
+            ]
+        )
+
+    @staticmethod
     def moderation_request_kb(request_id: int) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
