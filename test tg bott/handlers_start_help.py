@@ -16,6 +16,21 @@ WELCOME_TEXT = (
 
 
 def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
+    async def send_welcome_message(msg: Message):
+        if cfg.ASSETS_CHANNEL_ID and cfg.START_BANNER_ID:
+            try:
+                await msg.bot.copy_message(
+                    chat_id=msg.chat.id,
+                    from_chat_id=cfg.ASSETS_CHANNEL_ID,
+                    message_id=cfg.START_BANNER_ID,
+                    caption=WELCOME_TEXT,
+                    reply_markup=Keyboards.bottom_menu(),
+                )
+                return
+            except Exception:
+                pass
+        await msg.answer(WELCOME_TEXT, reply_markup=Keyboards.bottom_menu())
+
     @router.message(CommandStart())
     async def cmd_start(msg: Message, state: FSMContext):
         user = msg.from_user
@@ -94,7 +109,7 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
             )
             return
 
-        await msg.answer(WELCOME_TEXT, reply_markup=Keyboards.bottom_menu())
+        await send_welcome_message(msg)
 
     @router.callback_query(F.data == "offer:accept")
     async def accept_offer(cq: CallbackQuery):
@@ -102,7 +117,7 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
         if not await db.is_offer_accepted(user_id):
             await db.set_offer_accepted(user_id, True)
         await cq.message.edit_reply_markup(reply_markup=None)
-        await cq.message.answer(WELCOME_TEXT, reply_markup=Keyboards.bottom_menu())
+        await send_welcome_message(cq.message)
         await cq.answer()
 
     @router.message(Command("help"))
