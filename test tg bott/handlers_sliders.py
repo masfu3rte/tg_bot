@@ -13,6 +13,21 @@ from handlers_offers_deals import DEAL_STATUS_STEPS
 
 def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
     # ===== Слайдер "Мои запросы" =====
+    async def ensure_moderation_thread_id(offer_id: int, bot) -> int | None:
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            return None
+        if offer.get("moderation_thread_id"):
+            return offer["moderation_thread_id"]
+        try:
+            topic = await bot.create_forum_topic(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                name=f"Сделка №{offer_id}",
+            )
+            await db.set_offer_moderation_thread_id(offer_id, topic.message_thread_id)
+            return topic.message_thread_id
+        except Exception:
+            return None
 
     async def send_request_card(msg_obj, user_id: int, req: dict):
         index, total = await db.get_active_request_index_and_total(user_id, req["id"])
@@ -336,6 +351,19 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
                 message_thread_id=cfg.MODERATION_TOPIC_ID,
                 text=f"Продавец поставил статус «Товар в пути до менеджера» по сделке №{offer_id}.",
             )
+            moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
+            if moderation_thread_id and moderation_thread_id != cfg.MODERATION_TOPIC_ID:
+                try:
+                    await cq.bot.send_message(
+                        chat_id=cfg.MODERATION_CHAT_ID,
+                        message_thread_id=moderation_thread_id,
+                        text=(
+                            "Продавец поставил статус «Товар в пути до менеджера» "
+                            f"по сделке №{offer_id}."
+                        ),
+                    )
+                except Exception:
+                    pass
 
         if buyer_id:
             try:
