@@ -20,6 +20,21 @@ DEAL_STATUS_STEPS = [
 
 
 def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
+    async def ensure_moderation_thread_id(offer_id: int, bot) -> int | None:
+        offer = await db.get_offer(offer_id)
+        if not offer:
+            return None
+        if offer.get("moderation_thread_id"):
+            return offer["moderation_thread_id"]
+        try:
+            topic = await bot.create_forum_topic(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                name=f"Сделка №{offer_id}",
+            )
+            await db.set_offer_moderation_thread_id(offer_id, topic.message_thread_id)
+            return topic.message_thread_id
+        except Exception:
+            return None
     # ===== FSM отклика =====
 
     @router.message(OfferCreate.waiting_for_price)
@@ -110,16 +125,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             photo_file_id=photo.file_id,
         )
 
-        moderation_thread_id = None
-        try:
-            topic = await msg.bot.create_forum_topic(
-                chat_id=cfg.MODERATION_CHAT_ID,
-                name=f"Сделка №{offer_id}",
-            )
-            moderation_thread_id = topic.message_thread_id
-            await db.set_offer_moderation_thread_id(offer_id, moderation_thread_id)
-        except Exception:
-            moderation_thread_id = cfg.MODERATION_TOPIC_ID
+        moderation_thread_id = await ensure_moderation_thread_id(offer_id, msg.bot)
 
         text = (
             f"Новый отклик #{offer_id} на заявку №{request_id}\n"
@@ -129,13 +135,24 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             f"Состояние вещи: {condition}/10"
         )
 
-        await msg.bot.send_photo(
-            chat_id=cfg.MODERATION_CHAT_ID,
-            message_thread_id=moderation_thread_id,
-            photo=photo.file_id,
-            caption=text,
-            reply_markup=Keyboards.offer_moderation_kb(offer_id),
-        )
+        if moderation_thread_id:
+            await msg.bot.send_photo(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=moderation_thread_id,
+                photo=photo.file_id,
+                caption=text,
+                reply_markup=Keyboards.offer_moderation_kb(offer_id),
+            )
+        else:
+            await msg.bot.send_photo(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                photo=photo.file_id,
+                caption=(
+                    "⚠️ Не удалось создать отдельный топик для сделки.\n\n"
+                    f"{text}"
+                ),
+                reply_markup=Keyboards.offer_moderation_kb(offer_id),
+            )
 
         await msg.answer(
             "Ваш отклик отправлен на модерацию. После принятия модератором "
@@ -283,7 +300,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             await cq.answer("Сделка не найдена.", show_alert=True)
             return
 
-        moderation_thread_id = offer.get("moderation_thread_id") or cfg.MODERATION_TOPIC_ID
+        moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
         if side == "buyer":
             await db.set_buyer_deposit_status(offer_id, "pending")
         elif side == "seller":
@@ -293,12 +310,19 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             f"Поступил запрос проверки оплаты залога от стороны: {side}\n"
             f"Сделка #{offer_id}, заявка №{offer['request_id']}."
         )
-        await cq.bot.send_message(
-            chat_id=cfg.MODERATION_CHAT_ID,
-            message_thread_id=moderation_thread_id,
-            text=text,
-            reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, side),
-        )
+        if moderation_thread_id:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=moderation_thread_id,
+                text=text,
+                reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, side),
+            )
+        else:
+            await cq.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                text=f"⚠️ Не удалось создать отдельный топик для сделки.\n\n{text}",
+                reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, side),
+            )
         await cq.answer("Запрос на проверку отправлен модератору.")
 
     @router.callback_query(F.data.startswith("deal:confirm:"))
@@ -397,17 +421,24 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             await msg.answer("Сделка не найдена.")
             return
 
-        moderation_thread_id = offer.get("moderation_thread_id") or cfg.MODERATION_TOPIC_ID
+        moderation_thread_id = await ensure_moderation_thread_id(offer_id, msg.bot)
         text = (
             f"Продавец указал трек-номер по сделке №{offer_id}:\n"
             f"{track}"
         )
-        await msg.bot.send_message(
-            chat_id=cfg.MODERATION_CHAT_ID,
-            message_thread_id=moderation_thread_id,
-            text=text,
-            reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, "track"),
-        )
+        if moderation_thread_id:
+            await msg.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=moderation_thread_id,
+                text=text,
+                reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, "track"),
+            )
+        else:
+            await msg.bot.send_message(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                text=f"⚠️ Не удалось создать отдельный топик для сделки.\n\n{text}",
+                reply_markup=Keyboards.deal_payment_moderation_kb(offer_id, "track"),
+            )
         await msg.answer("Трек-номер отправлен модератору на проверку.")
 
     @router.callback_query(F.data.startswith("deal:confirm:track:"))
