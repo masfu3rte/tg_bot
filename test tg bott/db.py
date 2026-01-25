@@ -78,6 +78,7 @@ class Database:
                 deal_status             INTEGER DEFAULT 0,
                 buyer_deposit_status    TEXT DEFAULT 'none',
                 seller_deposit_status   TEXT DEFAULT 'none',
+                moderation_thread_id    INTEGER,
                 track_number            TEXT,
                 track_status            TEXT DEFAULT 'none',
                 final_payment_status    TEXT DEFAULT 'none'
@@ -86,6 +87,15 @@ class Database:
         )
 
         self.conn.commit()
+        self._ensure_offers_thread_column()
+
+    def _ensure_offers_thread_column(self):
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA table_info(offers)")
+        columns = {row["name"] for row in cur.fetchall()}
+        if "moderation_thread_id" not in columns:
+            cur.execute("ALTER TABLE offers ADD COLUMN moderation_thread_id INTEGER")
+            self.conn.commit()
 
     def _row_to_dict(self, row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
@@ -406,6 +416,14 @@ class Database:
     async def set_offer_status(self, offer_id: int, status: str):
         cur = self.conn.cursor()
         cur.execute("UPDATE offers SET status=? WHERE id=?", (status, offer_id))
+        self.conn.commit()
+
+    async def set_offer_moderation_thread_id(self, offer_id: int, thread_id: int):
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE offers SET moderation_thread_id=? WHERE id=?",
+            (thread_id, offer_id),
+        )
         self.conn.commit()
 
     async def set_buyer_deposit_status(self, offer_id: int, status: str):
