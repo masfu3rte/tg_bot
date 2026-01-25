@@ -332,7 +332,11 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             )
         await cq.answer("Запрос на проверку отправлен модератору.")
 
-    @router.callback_query(F.data.startswith("deal:confirm:"))
+    @router.callback_query(
+        F.data.startswith("deal:confirm:buyer:")
+        | F.data.startswith("deal:confirm:seller:")
+        | F.data.startswith("deal:confirm:final:")
+    )
     async def deal_payment_confirm(cq: CallbackQuery):
         _, _, side, offer_id_s = cq.data.split(":")
         offer_id = int(offer_id_s)
@@ -410,7 +414,11 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         await cq.answer("Оплата подтверждена.")
 
-    @router.callback_query(F.data.startswith("deal:cancel:"))
+    @router.callback_query(
+        F.data.startswith("deal:cancel:buyer:")
+        | F.data.startswith("deal:cancel:seller:")
+        | F.data.startswith("deal:cancel:final:")
+    )
     async def deal_payment_cancel(cq: CallbackQuery):
         _, _, side, offer_id_s = cq.data.split(":")
         offer_id = int(offer_id_s)
