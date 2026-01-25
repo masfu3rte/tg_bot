@@ -61,8 +61,8 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
     async def edit_cdek(cq: CallbackQuery, state: FSMContext):
         await state.set_state(ProfileEdit.waiting_for_cdek_form)
         await cq.message.answer(
-            "Отправьте контактные данные CDEK одной строкой в формате:\n"
-            "<b>ФИО; телефон; адрес ПВЗ</b>"
+            "Отправьте контактные данные CDEK тремя строками в формате:\n"
+            "<b>ФИО\nтелефон\nадрес ПВЗ</b>"
         )
         await cq.answer()
 
@@ -70,16 +70,16 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
     async def edit_req(cq: CallbackQuery, state: FSMContext):
         await state.set_state(ProfileEdit.waiting_for_req_form)
         await cq.message.answer(
-            "Отправьте реквизиты одной строкой в формате:\n"
-            "<b>ФИО; номер карты; банк</b>"
+            "Отправьте реквизиты тремя строками в формате:\n"
+            "<b>ФИО\nномер карты\nбанк</b>"
         )
         await cq.answer()
 
     @router.message(ProfileEdit.waiting_for_cdek_form)
     async def save_cdek(msg: Message, state: FSMContext):
-        parts = [p.strip() for p in (msg.text or "").split(";")]
+        parts = [p.strip() for p in (msg.text or "").splitlines() if p.strip()]
         if len(parts) != 3:
-            await msg.answer("Нужно три части: ФИО; телефон; адрес ПВЗ.")
+            await msg.answer("Нужно три строки: ФИО, телефон, адрес ПВЗ.")
             return
         fio, phone, pvz = parts
         await db.set_cdek_contacts(msg.from_user.id, fio, phone, pvz)
@@ -89,9 +89,9 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
 
     @router.message(ProfileEdit.waiting_for_req_form)
     async def save_req(msg: Message, state: FSMContext):
-        parts = [p.strip() for p in (msg.text or "").split(";")]
+        parts = [p.strip() for p in (msg.text or "").splitlines() if p.strip()]
         if len(parts) != 3:
-            await msg.answer("Нужно три части: ФИО; номер карты; банк.")
+            await msg.answer("Нужно три строки: ФИО, номер карты, банк.")
             return
         fio, card, bank = parts
         await db.set_requisites(msg.from_user.id, fio, card, bank)
