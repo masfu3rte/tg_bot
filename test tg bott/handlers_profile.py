@@ -25,6 +25,12 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             f"Приглашено пользователей: {count}",
             f"Доход с комиссии: {balance:.2f} руб.",
             "",
+            "Краткое руководство по реферальной программе:",
+            "1) Передайте вашу реферальную ссылку новым пользователям.",
+            "2) Пользователь переходит по ссылке и проходит регистрацию.",
+            "3) Вам начисляется 10% от комиссии с его сделок, сумма",
+            "   накапливается на реферальном балансе.",
+            "",
             "Ваша реферальная ссылка:",
             link,
         ]
@@ -82,6 +88,16 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         user_id = msg.from_user.id
         text = await build_referral_text(user_id, msg.bot)
         await msg.answer(text, reply_markup=Keyboards.referral_withdraw_kb())
+
+    @router.callback_query(F.data == "profile:referrals")
+    async def my_referrals_inline(cq: CallbackQuery):
+        user_id = cq.from_user.id
+        text = await build_referral_text(user_id, cq.bot)
+        try:
+            await cq.message.edit_text(text, reply_markup=Keyboards.referral_withdraw_kb())
+        except Exception:
+            await cq.message.answer(text, reply_markup=Keyboards.referral_withdraw_kb())
+        await cq.answer()
 
     @router.callback_query(F.data == "referral:withdraw")
     async def referral_withdraw(cq: CallbackQuery):
