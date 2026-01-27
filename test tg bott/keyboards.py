@@ -170,6 +170,12 @@ class Keyboards:
                         text="🗑 Удалить заявку", callback_data=f"ur:del:{request_id}"
                     )
                 ],
+                [
+                    InlineKeyboardButton(
+                        text="↩️ Вернуться к активным запросам",
+                        callback_data="requests:active",
+                    )
+                ],
             ]
         )
 

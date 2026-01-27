@@ -385,6 +385,11 @@ class Database:
             "req": req,
         }
 
+    async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+        return self._row_to_dict(cur.fetchone())
+
     async def get_cdek_contacts(self, user_id: int) -> Optional[Dict[str, Any]]:
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM cdek_contacts WHERE user_id=?", (user_id,))
@@ -565,6 +570,12 @@ class Database:
             (request_id,),
         )
         return cur.fetchone() is not None
+
+    async def get_offers_count_for_request(self, request_id: int) -> int:
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) AS cnt FROM offers WHERE request_id=?", (request_id,))
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
 
     # ===== OFFERS =====
 
