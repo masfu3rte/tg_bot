@@ -80,6 +80,15 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
         await cq.message.answer("Главное меню:", reply_markup=K.bottom_menu())
         await cq.answer()
 
+    @router.callback_query(F.data == "requests:menu")
+    async def back_to_requests_menu_inline(cq: CallbackQuery):
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+        await send_my_requests_menu(cq.message.chat.id, cq.bot)
+        await cq.answer()
+
     @router.message(RequestCreate.waiting_for_internal_title)
     async def req_internal_title(msg: Message, state: FSMContext):
         await state.update_data(internal_title=msg.text.strip())
