@@ -172,8 +172,8 @@ class Keyboards:
                 ],
                 [
                     InlineKeyboardButton(
-                        text="↩️ Вернуться к активным запросам",
-                        callback_data="requests:active",
+                        text="↩️ Вернуться к запросам",
+                        callback_data="requests:menu",
                     )
                 ],
             ]
