@@ -375,9 +375,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                 pass
 
         try:
-            if cq.message.photo:
+            if cq.message.caption is not None:
                 await cq.message.edit_caption(
-                    (cq.message.caption or "")
+                    cq.message.caption
                     + "\n\n✅ Отклик одобрен, ожидаем решение покупателя.",
                     reply_markup=None,
                 )
@@ -450,9 +450,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                 pass
 
         try:
-            if cq.message.photo:
+            if cq.message.caption is not None:
                 await cq.message.edit_caption(
-                    (cq.message.caption or "") + "\n\n✅ Вы приняли отклик.",
+                    cq.message.caption + "\n\n✅ Вы приняли отклик.",
                     reply_markup=None,
                 )
             else:
@@ -497,9 +497,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             pass
 
         try:
-            if cq.message.photo:
+            if cq.message.caption is not None:
                 await cq.message.edit_caption(
-                    (cq.message.caption or "") + "\n\n❌ Вы отклонили отклик.",
+                    cq.message.caption + "\n\n❌ Вы отклонили отклик.",
                     reply_markup=None,
                 )
             else:
