@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -35,6 +37,110 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             return topic.message_thread_id
         except Exception:
             return None
+
+    def format_deposit_status(status: str) -> str:
+        return "✅" if status == "confirmed" else "❌"
+
+    def format_due_date(offer: dict) -> str:
+        created_at = offer.get("created_at")
+        if not created_at:
+            return "дд.мм.гггг"
+        try:
+            parsed = datetime.fromisoformat(str(created_at).replace("Z", ""))
+        except Exception:
+            return "дд.мм.гггг"
+        days = offer.get("days") or 0
+        due = parsed + timedelta(days=days)
+        return due.strftime("%d.%m.%Y")
+
+    async def build_deal_moderation_intro(
+        offer: dict,
+        req: dict | None,
+    ) -> str:
+        request_id = offer["request_id"]
+        buyer_id = req["user_id"] if req else 0
+        seller_id = offer["buyer_id"]
+
+        buyer_user = await db.get_user(buyer_id) if buyer_id else None
+        seller_user = await db.get_user(seller_id)
+
+        offers_count = await db.get_offers_count_for_request(request_id)
+
+        buyer_requisites = await db.get_requisites(buyer_id) if buyer_id else None
+        seller_requisites = await db.get_requisites(seller_id)
+        buyer_contacts = await db.get_cdek_contacts(buyer_id) if buyer_id else None
+
+        item_name = req.get("item_name") if req else None
+        description = req.get("description") if req else None
+
+        base_price = offer["price_cents"] / 100.0
+        buyer_total = base_price * 1.07
+        service_fee = buyer_total - base_price
+        buyer_deposit = base_price * 0.2675
+        seller_deposit = base_price * 0.0535
+
+        buyer_username = safe_username(
+            buyer_user.get("username") if buyer_user else None,
+            buyer_id,
+        )
+        seller_username = safe_username(
+            seller_user.get("username") if seller_user else None,
+            seller_id,
+        )
+
+        buyer_card = buyer_requisites.get("card") if buyer_requisites else None
+        buyer_fio = buyer_requisites.get("fio") if buyer_requisites else None
+        seller_card = seller_requisites.get("card") if seller_requisites else None
+        seller_fio = seller_requisites.get("fio") if seller_requisites else None
+
+        buyer_contact_fio = buyer_contacts.get("fio") if buyer_contacts else None
+        buyer_contact_phone = buyer_contacts.get("phone") if buyer_contacts else None
+        buyer_contact_pvz = buyer_contacts.get("pvz") if buyer_contacts else None
+
+        status_map = {
+            "pending": "ожидает модерации",
+            "approved": "ожидает решения покупателя",
+            "buyer_accepted": "ожидает оплату залогов",
+            "buyer_rejected": "отклонено покупателем",
+            "rejected": "отклонено модератором",
+        }
+        status_label = status_map.get(offer.get("status"), offer.get("status") or "")
+
+        def fmt(value: str | None) -> str:
+            return value or ""
+
+        return (
+            f"Заявка №{request_id}\n"
+            f"• Название: {fmt(item_name)}\n"
+            f"• Описание: {fmt(description)}\n\n"
+            "Покупатель:\n"
+            f"ID: {buyer_id:07d}\n"
+            f"User: {buyer_username}\n\n"
+            f"Количество откликов: {offers_count}\n\n"
+            "Принятый отклик:\n"
+            "Продавец:\n"
+            f"ID:{seller_id:07d}\n"
+            f"User: {seller_username}\n\n"
+            f"Общая сумма сделки: {buyer_total:.2f}₽\n"
+            f"Сумма которую получает продавец: {base_price:.2f}₽\n"
+            f"Наценка сервиса: {service_fee:.2f}₽\n"
+            f"Залог покупателя: {buyer_deposit:.2f}₽\n"
+            f"- Внесен: {format_deposit_status(offer.get('buyer_deposit_status'))}\n"
+            f"Залог продавца: {seller_deposit:.2f}₽\n"
+            f"- Внесен: {format_deposit_status(offer.get('seller_deposit_status'))}\n"
+            f"Сроки до: {format_due_date(offer)}\n\n"
+            "Реквизиты продавца\n"
+            f"Номер карты: {fmt(seller_card)}\n"
+            f"Фио: {fmt(seller_fio)}\n\n"
+            "Реквизиты покупателя\n"
+            f"Номер карты: {fmt(buyer_card)}\n"
+            f"Фио: {fmt(buyer_fio)}\n\n"
+            "Данные покупателя для отправки:\n"
+            f"Фио: {fmt(buyer_contact_fio)}\n"
+            f"Адрес пункта выдачи: {fmt(buyer_contact_pvz)}\n"
+            f"Номер телефона: {fmt(buyer_contact_phone)}\n\n"
+            f"Статус: {status_label}"
+        )
 
     def build_deal_payment_texts(offer_id: int, offer: dict, req: dict) -> tuple[str, str]:
         base_price = offer["price_cents"] / 100.0
@@ -172,19 +278,8 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, msg.bot)
 
         req = await db.get_request(request_id)
-        link = build_request_link(cfg, req) if req else None
-        if link:
-            request_title = f'<a href="{link}">заявку №{request_id}</a>'
-        else:
-            request_title = f"заявку №{request_id}"
-
-        text = (
-            f"Новый отклик #{offer_id} на {request_title}\n"
-            f"От: {safe_username(user.username, user.id)} (id {user.id})\n\n"
-            f"Цена: {price:.2f} руб.\n"
-            f"Срок доставки: {days} дн.\n"
-            f"Состояние вещи: {condition}/10"
-        )
+        offer = await db.get_offer(offer_id)
+        text = await build_deal_moderation_intro(offer, req) if offer else ""
 
         if moderation_thread_id:
             await msg.bot.send_photo(
