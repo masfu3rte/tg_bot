@@ -331,11 +331,13 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         else:
             deal_text = f"Сделка №{offer_id}"
 
+        base_price = offer["price_cents"] / 100.0
+        buyer_total = base_price * 1.07
         buyer_text = (
             "✅ Ваш запрос получил одобренный отклик.\n\n"
             f"{deal_text}\n\n"
-            f"Цена: {offer['price_cents'] / 100.0:.2f} руб.\n"
-            f"Срок доставки: {offer['days']} дн.\n"
+            f"Цена: {buyer_total:.0f}₽\n"
+            f"Срок доставки до менеджера: {offer['days']} дней\n"
             f"Состояние: {offer['condition']}/10\n\n"
             "Принять отклик?"
         )
@@ -362,17 +364,6 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             )
         except Exception:
             pass
-
-        # убираем "Откликнуться" у поста заявки
-        if req.get("channel_message_id"):
-            try:
-                await cq.bot.edit_message_reply_markup(
-                    chat_id=cfg.REQUESTS_PUBLIC_CHANNEL_ID,
-                    message_id=req["channel_message_id"],
-                    reply_markup=None,
-                )
-            except Exception:
-                pass
 
         try:
             if cq.message.photo or cq.message.caption is not None:
@@ -499,6 +490,18 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             )
         except Exception:
             pass
+
+        if req.get("channel_message_id"):
+            try:
+                bot_me = await cq.bot.get_me()
+                bot_link = f"https://t.me/{bot_me.username}?start=req_{req['id']}"
+                await cq.bot.edit_message_reply_markup(
+                    chat_id=cfg.REQUESTS_PUBLIC_CHANNEL_ID,
+                    message_id=req["channel_message_id"],
+                    reply_markup=Keyboards.request_public_kb(bot_link),
+                )
+            except Exception:
+                pass
 
         try:
             if cq.message.photo or cq.message.caption is not None:
