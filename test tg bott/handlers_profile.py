@@ -25,11 +25,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             f"Приглашено пользователей: {count}",
             f"Доход с комиссии: {balance:.2f} руб.",
             "",
-            "Краткое руководство по реферальной программе:",
-            "1) Передайте вашу реферальную ссылку новым пользователям.",
-            "2) Пользователь переходит по ссылке и проходит регистрацию.",
-            "3) Вам начисляется 10% от комиссии с его сделок, сумма",
-            "   накапливается на реферальном балансе.",
+            '<a href="https://t.me/durov">Краткое руководство по реферальной программе</a>',
             "",
             "Ваша реферальная ссылка:",
             link,
@@ -55,7 +51,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             f"Телефон: {profile['cdek'].get('phone') or '—'}",
             f"Адрес ПВЗ: {profile['cdek'].get('pvz') or '—'}",
             "",
-            "Реквизиты:",
+            "Банковские реквизиты:",
             f"ФИО: {profile['req'].get('fio') or '—'}",
             f"Карта: {profile['req'].get('card') or '—'}",
             f"Банк: {profile['req'].get('bank') or '—'}",
@@ -86,7 +82,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
     async def my_profile(msg: Message):
         await send_profile(msg)
 
-    @router.message(F.text == "🤝 Рефералы")
+    @router.message(F.text == "🤝 Реферальная система")
     async def my_referrals(msg: Message):
         user_id = msg.from_user.id
         text = await build_referral_text(user_id, msg.bot)
@@ -126,7 +122,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             "Запрос на вывод реферальных средств.\n"
             f"Пользователь: {safe_username(cq.from_user.username, user_id)} (id {user_id})\n"
             f"Сумма: {amount:.2f} руб.\n\n"
-            "Реквизиты:\n"
+            "Банковские реквизиты:\n"
             f"{req_text}"
         )
         try:
@@ -160,8 +156,8 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         except Exception:
             pass
         await cq.message.answer(
-            "Отправьте контактные данные CDEK тремя строками в формате:\n"
-            "<b>ФИО\nтелефон\nадрес ПВЗ</b>",
+            "<b>Отправьте контактные данные CDEK тремя строками в формате:</b>\n"
+            "ФИО\nтелефон\nадрес ПВЗ",
             reply_markup=Keyboards.profile_back_inline(),
         )
         await cq.answer()
@@ -174,7 +170,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         except Exception:
             pass
         await cq.message.answer(
-            "Отправьте реквизиты тремя строками в формате:\n"
+            "Отправьте банковские реквизиты тремя строками в формате:\n"
             "<b>ФИО\nномер карты\nбанк</b>",
             reply_markup=Keyboards.profile_back_inline(),
         )
@@ -264,5 +260,5 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         fio, card, bank = parts
         await db.set_requisites(msg.from_user.id, fio, card, bank)
         await state.clear()
-        await msg.answer("Реквизиты обновлены.")
+        await msg.answer("Банковские реквизиты обновлены.")
         await send_profile(msg)

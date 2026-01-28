@@ -78,8 +78,13 @@ class Keyboards:
                         text="✏️ Контактные данные CDEK", callback_data="profile:cdek"
                     )
                 ],
-                [InlineKeyboardButton(text="✏️ Реквизиты", callback_data="profile:req")],
-                [InlineKeyboardButton(text="🤝 Рефералы", callback_data="profile:referrals")],
+                [InlineKeyboardButton(text="✏️ Банковские реквизиты", callback_data="profile:req")],
+                [
+                    InlineKeyboardButton(
+                        text="🤝 Реферальная система",
+                        callback_data="profile:referrals",
+                    )
+                ],
             ]
         )
 
@@ -415,38 +420,28 @@ class Keyboards:
 
     @staticmethod
     def deal_status_menu_kb(
-        offer_id: int, status_index: int, total: int
+        offer_id: int, current_index: int, statuses: list[str]
     ) -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
+        rows = []
+        for idx, status in enumerate(statuses, start=1):
+            prefix = "✅" if idx == current_index else "▫️"
+            rows.append(
                 [
                     InlineKeyboardButton(
-                        text="«",
-                        callback_data=f"deal:status_prev:{offer_id}:{status_index}",
-                    ),
-                    InlineKeyboardButton(
-                        text=f"{status_index}/{total}",
-                        callback_data=f"deal:status_show:{offer_id}:{status_index}",
-                    ),
-                    InlineKeyboardButton(
-                        text="»",
-                        callback_data=f"deal:status_next:{offer_id}:{status_index}",
-                    ),
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="✅ Выбрать этот статус",
-                        callback_data=f"deal:status_set:{offer_id}:{status_index}",
+                        text=f"{prefix} {status}",
+                        callback_data=f"deal:status_pick:{offer_id}:{idx}",
                     )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🔙 Вернуться",
-                        callback_data=f"deal:status_back:{offer_id}",
-                    )
-                ],
+                ]
+            )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🔙 Вернуться",
+                    callback_data=f"deal:status_back:{offer_id}",
+                )
             ]
         )
+        return InlineKeyboardMarkup(inline_keyboard=rows)
 
     @staticmethod
     def deal_close_confirm_kb(offer_id: int) -> InlineKeyboardMarkup:

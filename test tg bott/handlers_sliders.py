@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -32,22 +34,31 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
     async def send_request_card(msg_obj, user_id: int, req: dict):
         index, total = await db.get_active_request_index_and_total(user_id, req["id"])
 
-        # Новый шаблон
+        deal = await db.get_accepted_offer_for_request(req["id"])
+        title_prefix = "Сделка" if deal else "Заявка"
         text_lines = [
-            f"Заявка №{req['id']}",
-            f"Личное название: {req['internal_title']}",
-            f"Название предмета: {req['item_name']}",
+            f"{title_prefix} №{req['id']}",
+            f"Личное название: {req.get('internal_title') or ''}",
+            f"Название предмета: {req.get('item_name') or ''}",
             "",
-            f"Описание:\n{req['description']}",
+            f"Описание:\n{req.get('description') or ''}",
         ]
 
-        deal = await db.get_accepted_offer_for_request(req["id"])
         if deal:
             base_price = deal["price_cents"] / 100.0
+            buyer_total = base_price * 1.07
+            buyer_deposit = base_price * 0.2675
+            status_idx = max(0, min(len(DEAL_STATUS_STEPS) - 1, deal["deal_status"]))
+            status_name = DEAL_STATUS_STEPS[status_idx]
+            if deal.get("final_payment_status") == "confirmed":
+                remaining = 0
+            elif deal.get("buyer_deposit_status") == "confirmed":
+                remaining = max(buyer_total - buyer_deposit, 0)
+            else:
+                remaining = buyer_total
             text_lines.append("")
-            text_lines.append("Одобренный отклик:")
-            text_lines.append(f"• Цена: {base_price:.2f}₽")
-            text_lines.append(f"• Срок доставки до менеджера: {deal['days']} дн.")
+            text_lines.append(f"Статус сделки: {status_name}")
+            text_lines.append(f"Осталось оплатить: {remaining:.0f}₽")
 
         text = "\n".join(text_lines)
         kb = Keyboards.user_requests_slider_kb(req["id"], index, total)
@@ -192,20 +203,25 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
         deal_line = f'<a href="{link}">Сделка №{offer["id"]}</a>' if link else f"Сделка №{offer['id']}"
 
         base_price = offer["price_cents"] / 100.0
-        status_idx = max(0, min(len(DEAL_STATUS_STEPS) - 1, offer["deal_status"]))
-        status_name = DEAL_STATUS_STEPS[status_idx]
+        created_at = offer.get("created_at")
+        due_date = ""
+        if created_at:
+            try:
+                parsed = datetime.fromisoformat(str(created_at).replace("Z", ""))
+                days = offer.get("days") or 0
+                due_date = (parsed + timedelta(days=days)).strftime("%d.%m.%Y")
+            except Exception:
+                due_date = ""
 
         text_lines = [
             deal_line,
             f"Заявка №{offer['request_id']}",
             "",
             f"Цена: {base_price:.2f} руб.",
-            f"Срок доставки: {offer['days']} дн.",
+            f"Срок доставки: (до {due_date})" if due_date else "Срок доставки: (до мм.дд.гггг)",
             f"Состояние: {offer['condition']}/10",
             "",
-            f"Статус сделки: {status_name}",
-            f"Статус залога покупателя: {offer['buyer_deposit_status']}",
-            f"Статус залога продавца: {offer['seller_deposit_status']}",
+            "Статус сделки: Внесены залоги «Изначально»",
         ]
         if offer.get("track_number"):
             text_lines.append(f"Трек-номер: {offer['track_number']} ({offer['track_status']})")
@@ -293,63 +309,23 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             await cq.answer("Менять статус может только продавец.", show_alert=True)
             return
         idx = max(1, offer["deal_status"] or 1)
-        total = len(DEAL_STATUS_STEPS)
-        status_name = DEAL_STATUS_STEPS[idx - 1]
-
         req = await db.get_request(offer["request_id"]) or {}
         link = build_request_link(cfg, req) or f"Сделка №{offer_id}"
 
         text = (
             f"{link}\n"
             f"Статус сделки №{offer_id}.\n"
-            f"Выбранный статус: {status_name}\n\n"
-            "Нажмите «Выбрать этот статус» для сохранения."
+            "Выберите нужный статус из списка ниже."
         )
         await cq.message.answer(
             text,
-            reply_markup=Keyboards.deal_status_menu_kb(offer_id, idx, total),
+            reply_markup=Keyboards.deal_status_menu_kb(
+                offer_id, idx, DEAL_STATUS_STEPS
+            ),
         )
         await cq.answer()
 
-    @router.callback_query(F.data.startswith("deal:status_prev:"))
-    async def deal_status_prev(cq: CallbackQuery):
-        _, _, offer_s, idx_s = cq.data.split(":")
-        offer_id = int(offer_s)
-        idx = int(idx_s)
-        idx = idx - 1 if idx > 1 else len(DEAL_STATUS_STEPS)
-        total = len(DEAL_STATUS_STEPS)
-        status_name = DEAL_STATUS_STEPS[idx - 1]
-        text = (
-            f"Статус сделки №{offer_id}.\n"
-            f"Выбранный статус: {status_name}\n\n"
-            "Нажмите «Выбрать этот статус» для сохранения."
-        )
-        await cq.message.edit_text(
-            text,
-            reply_markup=Keyboards.deal_status_menu_kb(offer_id, idx, total),
-        )
-        await cq.answer()
-
-    @router.callback_query(F.data.startswith("deal:status_next:"))
-    async def deal_status_next(cq: CallbackQuery):
-        _, _, offer_s, idx_s = cq.data.split(":")
-        offer_id = int(offer_s)
-        idx = int(idx_s)
-        idx = idx + 1 if idx < len(DEAL_STATUS_STEPS) else 1
-        total = len(DEAL_STATUS_STEPS)
-        status_name = DEAL_STATUS_STEPS[idx - 1]
-        text = (
-            f"Статус сделки №{offer_id}.\n"
-            f"Выбранный статус: {status_name}\n\n"
-            "Нажмите «Выбрать этот статус» для сохранения."
-        )
-        await cq.message.edit_text(
-            text,
-            reply_markup=Keyboards.deal_status_menu_kb(offer_id, idx, total),
-        )
-        await cq.answer()
-
-    @router.callback_query(F.data.startswith("deal:status_set:"))
+    @router.callback_query(F.data.startswith("deal:status_pick:"))
     async def deal_status_set(cq: CallbackQuery, state: FSMContext):
         _, _, offer_s, idx_s = cq.data.split(":")
         offer_id = int(offer_s)
@@ -422,7 +398,13 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
                 pass
 
         try:
-            await cq.message.edit_reply_markup(reply_markup=None)
+            await cq.message.edit_text(
+                f"Статус сделки №{offer_id}.\n"
+                "Выберите нужный статус из списка ниже.",
+                reply_markup=Keyboards.deal_status_menu_kb(
+                    offer_id, idx, DEAL_STATUS_STEPS
+                ),
+            )
         except Exception:
             pass
 
