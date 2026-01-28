@@ -161,24 +161,24 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             f"Сумма залога для покупателя: {buyer_deposit:.2f} руб."
         )
 
+        buyer_requisites_text = cfg.MANAGER_REQUISITES_TEXT.replace(":\n", ":\n\n", 1)
         buyer_text = (
-            "✅ Ваш отклик подтвержден, можно переходить к оплате.\n\n"
+            "✅ Вы подтвердили отклик, можно переходить к оплате залогов.\n\n"
             f"{deal_text}\n\n"
-            f"Сумма товара: {buyer_total:.2f} руб.\n"
-            f"Ваш залог (25%): {buyer_deposit:.2f} руб.\n\n"
-            f"{block}\n\n"
-            f"{cfg.MANAGER_REQUISITES_TEXT}\n\n"
-            f"Укажите в комментарии «№{offer_id}».\n\n"
+            f"Сумма товара: {buyer_total:.0f}₽.\n"
+            f"Ваш залог (25%): {buyer_deposit:.0f}₽.\n\n"
+            f"{buyer_requisites_text}\n\n"
+            f"Укажите в комментарии к платежу «№{offer_id}».\n\n"
             "После оплаты нажмите кнопку «Оплатил»."
         )
 
+        seller_requisites_text = cfg.MANAGER_REQUISITES_TEXT.replace(":\n", ":\n\n", 1)
         seller_text = (
-            "✅ Покупатель принял отклик, можно переходить к оплате.\n\n"
+            "✅ Покупатель принял ваш отклик, можно переходить к оплате залога.\n\n"
             f"{deal_text}\n\n"
-            f"Сумма товара: {base_price:.2f} руб.\n"
-            f"Ваш залог (5,35%): {seller_deposit:.2f} руб.\n\n"
-            f"{block}\n\n"
-            f"{cfg.MANAGER_REQUISITES_TEXT}\n\n"
+            f"Сумма сделки: {buyer_total:.0f}₽.\n"
+            f"Ваш залог (5%): {seller_deposit:.0f}₽.\n\n"
+            f"{seller_requisites_text}\n\n"
             f"Укажите в комментарии «№{offer_id}».\n\n"
             "После оплаты нажмите кнопку «Оплатил»."
         )
@@ -627,12 +627,24 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         if target_id:
             try:
-                await cq.bot.send_message(
-                    chat_id=target_id,
-                    text=(
+                if side == "buyer":
+                    text = (
+                        f"Оплата залога покупателя по Сделке №{offer_id} "
+                        "подтверждена модератором."
+                    )
+                elif side == "seller":
+                    text = (
+                        f"Оплата залога продавца по Сделке №{offer_id} "
+                        "подтверждена модератором."
+                    )
+                else:
+                    text = (
                         f"Оплата {'остатка' if side == 'final' else 'залога'} "
                         f"({side}) по сделке №{offer_id} подтверждена."
-                    ),
+                    )
+                await cq.bot.send_message(
+                    chat_id=target_id,
+                    text=text,
                 )
             except Exception:
                 pass
@@ -674,6 +686,32 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             and offer["seller_deposit_status"] == "confirmed"
         ):
             await db.set_deal_status(offer_id, 1)
+            req_after = await db.get_request(offer["request_id"])
+            buyer_id = req_after["user_id"] if req_after else None
+            seller_id = offer["buyer_id"]
+            if buyer_id:
+                try:
+                    await cq.bot.send_message(
+                        chat_id=buyer_id,
+                        text=(
+                            "Обе стороны внесли залоги. Вы можете следить за статусом "
+                            "сделки во вкладке «Активные запросы», вам придет уведомление "
+                            "когда менеджер получит товар."
+                        ),
+                    )
+                except Exception:
+                    pass
+            if seller_id:
+                try:
+                    await cq.bot.send_message(
+                        chat_id=seller_id,
+                        text=(
+                            "Обе стороны внесли залоги, можете приступать к выкупу товара. "
+                            "Не забудьте менять статус сделки во вкладке «Мои отклики»."
+                        ),
+                    )
+                except Exception:
+                    pass
 
         try:
             await cq.message.edit_reply_markup(reply_markup=None)
