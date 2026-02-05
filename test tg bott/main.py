@@ -12,6 +12,8 @@ from handlers_profile import setup_profile_handlers
 from handlers_requests import setup_requests_handlers
 from handlers_offers_deals import setup_offers_deals_handlers
 from handlers_sliders import setup_sliders_handlers
+from handlers_reports import setup_reports_handlers
+from reports import start_reports_task
 
 
 async def main():
@@ -31,6 +33,9 @@ async def main():
     setup_requests_handlers(dp, db, cfg)
     setup_offers_deals_handlers(dp, db, cfg)
     setup_sliders_handlers(dp, db, cfg)
+    setup_reports_handlers(dp, db, cfg)
+
+    start_reports_task(bot, db, cfg)
 
     await dp.start_polling(bot)
 
