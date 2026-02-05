@@ -16,6 +16,7 @@ class Config:
 
     MODERATION_CHAT_ID: int
     MODERATION_TOPIC_ID: Optional[int]
+    REPORTS_TOPIC_ID: Optional[int]
     REQUESTS_PUBLIC_CHANNEL_ID: int
 
     ASSETS_CHANNEL_ID: Optional[int]
@@ -46,6 +47,7 @@ def load_config() -> Config:
         # ворк-чат с модерацией
         MODERATION_CHAT_ID=-1003236074223,
         MODERATION_TOPIC_ID=11,
+        REPORTS_TOPIC_ID=10,
 
         # канал с заявками
         REQUESTS_PUBLIC_CHANNEL_ID=-1003026579376,
