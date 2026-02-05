@@ -40,7 +40,8 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             "Ваш профиль:",
             f"{username}",
             f"Дата регистрации: {profile['created_date']}",
-            f"Ваш рейтинг: {profile['rating']}",
+            f"Сумма всех откликов: {profile['responses_sum']}",
+            f"Выполнено откликов: {profile['completed_responses_count']}",
             "",
             f"Создано запросов: {profile['requests_count']}",
             f"Сделано откликов: {profile['responses_count']}",
@@ -156,7 +157,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         except Exception:
             pass
         await cq.message.answer(
-            "<b>Отправьте контактные данные CDEK тремя строками в формате:</b>\n"
+            "Отправьте контактные данные CDEK тремя строками в формате:\n"
             "ФИО\nтелефон\nадрес ПВЗ",
             reply_markup=Keyboards.profile_back_inline(),
         )
@@ -171,7 +172,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             pass
         await cq.message.answer(
             "Отправьте банковские реквизиты тремя строками в формате:\n"
-            "<b>ФИО\nномер карты\nбанк</b>",
+            "ФИО\nномер карты\nбанк",
             reply_markup=Keyboards.profile_back_inline(),
         )
         await cq.answer()

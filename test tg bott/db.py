@@ -47,6 +47,13 @@ class Database:
                 ("status", "TEXT DEFAULT 'pending'"),
                 ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
             ],
+            "reports_sent": [
+                ("id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
+                ("report_type", "TEXT NOT NULL"),
+                ("period_start", "TEXT"),
+                ("period_end", "TEXT"),
+                ("sent_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+            ],
             "requests": [
                 ("id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
                 ("user_id", "INTEGER NOT NULL"),
@@ -348,6 +355,23 @@ class Database:
         responses_count = cur.fetchone()["cnt"]
 
         cur.execute(
+            "SELECT COALESCE(SUM(price_cents), 0) AS s FROM offers WHERE buyer_id=?",
+            (user_id,),
+        )
+        responses_sum_cents = cur.fetchone()["s"]
+        responses_sum = responses_sum_cents / 100.0
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM offers
+            WHERE buyer_id=? AND final_payment_status='confirmed'
+            """,
+            (user_id,),
+        )
+        completed_responses_count = cur.fetchone()["cnt"]
+
+        cur.execute(
             """
             SELECT COALESCE(SUM(price_cents), 0) AS s
             FROM offers
@@ -369,21 +393,98 @@ class Database:
         cur.execute("SELECT * FROM requisites WHERE user_id=?", (user_id,))
         req = self._row_to_dict(cur.fetchone()) or {"fio": None, "card": None, "bank": None}
 
-        rating_sum = u["rating_sum"] if u and u["rating_sum"] is not None else 0
-        rating_count = u["rating_count"] if u and u["rating_count"] is not None else 0
-        rating_value = rating_sum / rating_count if rating_count else 0.0
-
         return {
             "user_id": user_id,
             "username": u["username"] if u else None,
             "created_date": created_date,
             "requests_count": requests_count,
             "responses_count": responses_count,
+            "responses_sum": f"{responses_sum:.2f} руб.",
+            "completed_responses_count": completed_responses_count,
             "deals_sum": f"{deals_sum:.2f} руб.",
-            "rating": f"{rating_value:.2f}⭐",
             "cdek": cdek,
             "req": req,
         }
+
+    async def get_report_stats(
+        self, start_dt: Optional[datetime], end_dt: Optional[datetime]
+    ) -> Dict[str, int]:
+        cur = self.conn.cursor()
+
+        def format_dt(dt: datetime) -> str:
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        def build_date_filter(column: str):
+            clauses = []
+            params: list[str] = []
+            if start_dt:
+                clauses.append(f"{column} >= ?")
+                params.append(format_dt(start_dt))
+            if end_dt:
+                clauses.append(f"{column} < ?")
+                params.append(format_dt(end_dt))
+            where_clause = " AND ".join(clauses)
+            return where_clause, params
+
+        users_filter, users_params = build_date_filter("created_at")
+        users_sql = "SELECT COUNT(*) AS cnt FROM users"
+        if users_filter:
+            users_sql += f" WHERE {users_filter}"
+        cur.execute(users_sql, users_params)
+        new_users = cur.fetchone()["cnt"]
+
+        offers_filter, offers_params = build_date_filter("created_at")
+        offers_sql = "SELECT COUNT(*) AS cnt FROM offers WHERE status='approved'"
+        if offers_filter:
+            offers_sql += f" AND {offers_filter}"
+        cur.execute(offers_sql, offers_params)
+        new_deals = cur.fetchone()["cnt"]
+
+        return {
+            "new_users": new_users,
+            "new_deals": new_deals,
+        }
+
+    async def get_active_deals_summary(self) -> Dict[str, int]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt, COALESCE(SUM(price_cents), 0) AS total
+            FROM offers
+            WHERE status='approved' AND final_payment_status!='confirmed'
+            """
+        )
+        row = cur.fetchone()
+        return {
+            "active_deals_count": row["cnt"],
+            "active_deals_sum_cents": row["total"],
+        }
+
+    async def has_report_sent(
+        self, report_type: str, period_start: Optional[str], period_end: Optional[str]
+    ) -> bool:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT 1 FROM reports_sent
+            WHERE report_type=? AND period_start IS ? AND period_end IS ?
+            """,
+            (report_type, period_start, period_end),
+        )
+        return cur.fetchone() is not None
+
+    async def mark_report_sent(
+        self, report_type: str, period_start: Optional[str], period_end: Optional[str]
+    ) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO reports_sent (report_type, period_start, period_end)
+            VALUES (?, ?, ?)
+            """,
+            (report_type, period_start, period_end),
+        )
+        self.conn.commit()
 
     async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
         cur = self.conn.cursor()
