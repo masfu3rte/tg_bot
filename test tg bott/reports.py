@@ -59,12 +59,19 @@ async def _send_report(
     try:
         write_simple_xlsx(temp_path, "Отчет", [["Показатель", "Значение"], *rows])
         caption = f"Отчет: {report_type} ({period_label})"
-        await bot.send_document(
-            chat_id=cfg.MODERATION_CHAT_ID,
-            message_thread_id=cfg.REPORTS_TOPIC_ID,
-            document=FSInputFile(temp_path),
-            caption=caption,
-        )
+        try:
+            await bot.send_document(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                message_thread_id=cfg.REPORTS_TOPIC_ID,
+                document=FSInputFile(temp_path),
+                caption=caption,
+            )
+        except Exception:
+            await bot.send_document(
+                chat_id=cfg.MODERATION_CHAT_ID,
+                document=FSInputFile(temp_path),
+                caption=caption,
+            )
         await db.mark_report_sent(report_type, period_start, period_end)
     finally:
         try:
