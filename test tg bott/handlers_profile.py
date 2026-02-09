@@ -21,7 +21,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         link = f"https://t.me/{bot_username}?start=ref_{code}" if bot_username else code
 
         text_lines = [
-            "Ваша реферальная статистика:",
+            "<b>Ваша реферальная статистика:</b>",
             f"Приглашено пользователей: {count}",
             f"Доход с комиссии: {balance:.2f} руб.",
             "",
@@ -157,7 +157,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         except Exception:
             pass
         await cq.message.answer(
-            "Отправьте контактные данные CDEK тремя строками в формате:\n"
+            "<b>Отправьте контактные данные CDEK тремя строками в формате:</b>\n"
             "ФИО\nтелефон\nадрес ПВЗ",
             reply_markup=Keyboards.profile_back_inline(),
         )
