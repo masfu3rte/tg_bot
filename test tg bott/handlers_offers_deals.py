@@ -167,9 +167,13 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             f"Сумма залога для покупателя: {buyer_deposit:.2f} руб."
         )
 
-        buyer_requisites_text = cfg.MANAGER_REQUISITES_TEXT.replace(":\n", ":\n\n", 1)
+        buyer_requisites_text = cfg.MANAGER_REQUISITES_TEXT.replace(
+            "Реквизиты менеджера для оплаты залога:",
+            "<b>Реквизиты менеджера для оплаты залога:</b>",
+            1,
+        ).replace(":\n", ":\n\n", 1)
         buyer_text = (
-            "✅ Вы подтвердили отклик, можно переходить к оплате залогов.\n\n"
+            "✅ <b>Вы подтвердили отклик, можно переходить к оплате залогов.</b>\n\n"
             f"{deal_text}\n\n"
             f"Сумма товара: {buyer_total:.0f}₽.\n"
             f"Ваш залог (25%): {buyer_deposit:.0f}₽.\n\n"
@@ -324,18 +328,6 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         req = await db.get_request(offer["request_id"])
         if not req:
             await cq.answer("Заявка не найдена.", show_alert=True)
-            return
-
-        has_active_deal = await db.has_other_offer_with_statuses(
-            req["id"],
-            offer_id,
-            ("approved", "buyer_accepted"),
-        )
-        if has_active_deal:
-            await cq.answer(
-                "По этой заявке уже есть активная сделка. Второй отклик нельзя одобрить.",
-                show_alert=True,
-            )
             return
 
         await db.set_offer_status(offer_id, "approved")
