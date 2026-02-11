@@ -672,6 +672,46 @@ class Database:
         )
         return cur.fetchone() is not None
 
+    async def get_request_moderation_thread_id(self, request_id: int) -> Optional[int]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT moderation_thread_id
+              FROM offers
+             WHERE request_id=?
+               AND moderation_thread_id IS NOT NULL
+             ORDER BY id ASC
+             LIMIT 1
+            """,
+            (request_id,),
+        )
+        row = cur.fetchone()
+        return row["moderation_thread_id"] if row else None
+
+    async def has_other_offer_with_statuses(
+        self,
+        request_id: int,
+        offer_id: int,
+        statuses: tuple[str, ...],
+    ) -> bool:
+        if not statuses:
+            return False
+
+        placeholders = ",".join("?" for _ in statuses)
+        cur = self.conn.cursor()
+        cur.execute(
+            f"""
+            SELECT 1
+              FROM offers
+             WHERE request_id=?
+               AND id!=?
+               AND status IN ({placeholders})
+             LIMIT 1
+            """,
+            (request_id, offer_id, *statuses),
+        )
+        return cur.fetchone() is not None
+
     async def get_offers_count_for_request(self, request_id: int) -> int:
         cur = self.conn.cursor()
         cur.execute("SELECT COUNT(*) AS cnt FROM offers WHERE request_id=?", (request_id,))

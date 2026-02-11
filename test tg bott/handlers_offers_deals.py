@@ -28,10 +28,16 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             return None
         if offer.get("moderation_thread_id"):
             return offer["moderation_thread_id"]
+
+        existing_thread_id = await db.get_request_moderation_thread_id(offer["request_id"])
+        if existing_thread_id:
+            await db.set_offer_moderation_thread_id(offer_id, existing_thread_id)
+            return existing_thread_id
+
         try:
             topic = await bot.create_forum_topic(
                 chat_id=cfg.MODERATION_CHAT_ID,
-                name=f"Сделка №{offer_id}",
+                name=f"Сделка №{offer['request_id']}",
             )
             await db.set_offer_moderation_thread_id(offer_id, topic.message_thread_id)
             return topic.message_thread_id
@@ -320,6 +326,18 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             await cq.answer("Заявка не найдена.", show_alert=True)
             return
 
+        has_active_deal = await db.has_other_offer_with_statuses(
+            req["id"],
+            offer_id,
+            ("approved", "buyer_accepted"),
+        )
+        if has_active_deal:
+            await cq.answer(
+                "По этой заявке уже есть активная сделка. Второй отклик нельзя одобрить.",
+                show_alert=True,
+            )
+            return
+
         await db.set_offer_status(offer_id, "approved")
 
         buyer_id = req["user_id"]        # автор заявки (покупатель)
@@ -409,6 +427,22 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         if offer["status"] in {"buyer_rejected", "rejected"}:
             await cq.answer("Отклик уже отклонён.", show_alert=True)
+            return
+
+        already_accepted = await db.has_other_offer_with_statuses(
+            req["id"],
+            offer_id,
+            ("buyer_accepted",),
+        )
+        if already_accepted:
+            await cq.answer(
+                "Вы уже приняли другой отклик по этой заявке.",
+                show_alert=True,
+            )
+            try:
+                await cq.message.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
             return
 
         await db.set_offer_status(offer_id, "buyer_accepted")
@@ -642,8 +676,8 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                     )
                 else:
                     text = (
-                        f"Оплата {'остатка' if side == 'final' else 'залога'} "
-                        f"({side}) по сделке №{offer_id} подтверждена."
+                        f"Оплата остатка по сделке №{offer_id} подтверждена. "
+                        "Спасибо за пользование сервисом, ждем вас снова!"
                     )
                 await cq.bot.send_message(
                     chat_id=target_id,
@@ -684,7 +718,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                 )
 
         offer = await db.get_offer(offer_id)
-        if (
+        if side != "final" and (
             offer["buyer_deposit_status"] == "confirmed"
             and offer["seller_deposit_status"] == "confirmed"
         ):

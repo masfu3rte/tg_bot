@@ -21,10 +21,16 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             return None
         if offer.get("moderation_thread_id"):
             return offer["moderation_thread_id"]
+
+        existing_thread_id = await db.get_request_moderation_thread_id(offer["request_id"])
+        if existing_thread_id:
+            await db.set_offer_moderation_thread_id(offer_id, existing_thread_id)
+            return existing_thread_id
+
         try:
             topic = await bot.create_forum_topic(
                 chat_id=cfg.MODERATION_CHAT_ID,
-                name=f"Сделка №{offer_id}",
+                name=f"Сделка №{offer['request_id']}",
             )
             await db.set_offer_moderation_thread_id(offer_id, topic.message_thread_id)
             return topic.message_thread_id
