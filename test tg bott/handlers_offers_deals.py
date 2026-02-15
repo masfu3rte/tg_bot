@@ -343,12 +343,18 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         base_price = offer["price_cents"] / 100.0
         buyer_total = base_price * 1.07
+        seller_profile = await db.get_profile_view(seller_id)
+        seller_responses_sum = seller_profile.get("responses_sum", "0.00 руб.")
+        seller_completed_count = seller_profile.get("completed_responses_count", 0)
+
         buyer_text = (
             "✅ Ваш запрос получил одобренный отклик.\n\n"
             f"{deal_text}\n\n"
             f"Цена: {buyer_total:.0f}₽\n"
             f"Срок доставки до менеджера: {offer['days']} дней\n"
-            f"Состояние: {offer['condition']}/10\n\n"
+            f"Состояние: {offer['condition']}/10\n"
+            f"Сумма откликов продавца: {seller_responses_sum}\n"
+            f"Выполнено откликов: {seller_completed_count}\n\n"
             "Принять отклик?"
         )
 
@@ -1143,16 +1149,6 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                 )
             except Exception:
                 pass
-            if offer.get("seller_rating") is None:
-                try:
-                    await cq.bot.send_message(
-                        chat_id=buyer_id,
-                        text="Оцените продавца по завершённой сделке:",
-                        reply_markup=Keyboards.deal_rating_kb(offer_id),
-                    )
-                except Exception:
-                    pass
-
         try:
             await cq.message.edit_reply_markup(reply_markup=None)
         except Exception:
