@@ -355,7 +355,11 @@ class Database:
         responses_count = cur.fetchone()["cnt"]
 
         cur.execute(
-            "SELECT COALESCE(SUM(price_cents), 0) AS s FROM offers WHERE buyer_id=?",
+            """
+            SELECT COALESCE(SUM(price_cents), 0) AS s
+            FROM offers
+            WHERE buyer_id=? AND final_payment_status='confirmed'
+            """,
             (user_id,),
         )
         responses_sum_cents = cur.fetchone()["s"]

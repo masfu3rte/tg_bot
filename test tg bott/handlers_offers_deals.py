@@ -1,7 +1,8 @@
+import asyncio
 from datetime import datetime, timedelta
 
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
 
 from config import Config
@@ -22,6 +23,42 @@ DEAL_STATUS_STEPS = [
 
 
 def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
+    deal_arrival_album_buffers: dict[tuple[int, str], dict] = {}
+    deal_arrival_album_tasks: dict[tuple[int, str], asyncio.Task] = {}
+
+    async def flush_deal_arrival_album(key: tuple[int, str]):
+        await asyncio.sleep(0.8)
+        payload = deal_arrival_album_buffers.pop(key, None)
+        deal_arrival_album_tasks.pop(key, None)
+        if not payload:
+            return
+
+        bot = payload["bot"]
+        buyer_id = payload["buyer_id"]
+        offer_id = payload["offer_id"]
+        manager_chat_id = payload["manager_chat_id"]
+        manager_state = payload["state"]
+        photos = payload["photos"]
+
+        caption = (
+            f"Товар по сделке №{offer_id} прибыл.\n"
+            "Проверьте соответствие сделки и выберите действие."
+        )
+
+        try:
+            media = [InputMediaPhoto(media=file_id) for file_id in photos]
+            await bot.send_media_group(chat_id=buyer_id, media=media)
+            await bot.send_message(
+                chat_id=buyer_id,
+                text=caption,
+                reply_markup=Keyboards.deal_arrival_buyer_kb(offer_id),
+            )
+        except Exception:
+            pass
+
+        await manager_state.clear()
+        await bot.send_message(chat_id=manager_chat_id, text="Фото отправлены покупателю.")
+
     async def ensure_moderation_thread_id(offer_id: int, bot) -> int | None:
         offer = await db.get_offer(offer_id)
         if not offer:
@@ -985,6 +1022,30 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             return
 
         photo = msg.photo[-1]
+        media_group_id = msg.media_group_id
+
+        if media_group_id:
+            key = (msg.chat.id, media_group_id)
+            payload = deal_arrival_album_buffers.get(key)
+            if not payload:
+                payload = {
+                    "bot": msg.bot,
+                    "buyer_id": buyer_id,
+                    "offer_id": offer_id,
+                    "manager_chat_id": msg.chat.id,
+                    "state": state,
+                    "photos": [],
+                }
+                deal_arrival_album_buffers[key] = payload
+
+            payload["photos"].append(photo.file_id)
+
+            if key not in deal_arrival_album_tasks:
+                deal_arrival_album_tasks[key] = asyncio.create_task(
+                    flush_deal_arrival_album(key)
+                )
+            return
+
         caption = (
             f"Товар по сделке №{offer_id} прибыл.\n"
             "Проверьте соответствие сделки и выберите действие."
