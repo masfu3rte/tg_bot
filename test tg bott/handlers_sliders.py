@@ -74,12 +74,35 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
         else:
             await msg_obj.answer(text, reply_markup=kb)
 
+    async def send_my_requests_menu(chat_id: int, bot):
+        caption = (
+            "Снизу вы можете управлять и следить за вашими созданными запросами, а так же "
+            "создать новый запрос на поиск нужной вам вещи по лучшей цене."
+        )
+        if cfg.ASSETS_CHANNEL_ID and cfg.MY_REQUESTS_BANNER_MESSAGE_ID:
+            try:
+                await bot.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=cfg.ASSETS_CHANNEL_ID,
+                    message_id=cfg.MY_REQUESTS_BANNER_MESSAGE_ID,
+                    caption=caption,
+                    reply_markup=Keyboards.my_requests_menu(),
+                )
+                return
+            except Exception:
+                pass
+        await bot.send_message(
+            chat_id=chat_id,
+            text=caption,
+            reply_markup=Keyboards.my_requests_menu(),
+        )
+
     @router.message(F.text == "Активные запросы")
     async def requests_slider_start(msg: Message):
         user_id = msg.from_user.id
         req = await db.get_first_active_request(user_id)
         if not req:
-            await msg.answer("Активных запросов нет.")
+            await send_my_requests_menu(msg.chat.id, msg.bot)
             return
         await send_request_card(msg, user_id, req)
 
@@ -92,7 +115,7 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
         except Exception:
             pass
         if not req:
-            await cq.message.answer("Активных запросов нет.")
+            await send_my_requests_menu(cq.message.chat.id, cq.bot)
             await cq.answer()
             return
         await send_request_card(cq.message, user_id, req)
