@@ -1,14 +1,20 @@
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from dotenv import load_dotenv
 
-# ====== ВСТАВЬ СЮДА ЛЮБОЙ ТОКЕН БОТА ДЛЯ ПОЛУЧЕНИЯ file_id ======
-TOKEN = "8465643872:AAHqZXr_7_HKOL0uckoDjiFxtW3f0uG--Vw"
-# ================================================================
+load_dotenv()
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError(
+        "Не найдена обязательная переменная окружения BOT_TOKEN. "
+        "Создайте .env на основе .env.example и заполните значение."
+    )
 
 router = Router()
 

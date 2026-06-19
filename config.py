@@ -1,5 +1,8 @@
+import os
 from dataclasses import dataclass
 from typing import Optional
+
+from dotenv import load_dotenv
 
 
 @dataclass
@@ -32,49 +35,79 @@ class Config:
     SUPPORT_USERNAME: str  # для «Оспорить»
 
 
+def _required_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(
+            f"Не найдена обязательная переменная окружения {name}. "
+            "Создайте .env на основе .env.example и заполните значение."
+        )
+    return value
+
+
+def _env(name: str, default: str = "") -> str:
+    return os.getenv(name, default)
+
+
+def _env_int(name: str, default: int = 0) -> int:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Переменная окружения {name} должна быть целым числом.") from exc
+
+
+def _env_optional_int(name: str) -> Optional[int]:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Переменная окружения {name} должна быть целым числом.") from exc
+
+
 def load_config() -> Config:
+    load_dotenv()
+
     return Config(
-        BOT_TOKEN="8465643872:AAHqZXr_7_HKOL0uckoDjiFxtW3f0uG--Vw",
-        DB_PATH="bot.db",
+        BOT_TOKEN=_required_env("BOT_TOKEN"),
+        DB_PATH=_env("DB_PATH", "bot.db"),
 
-        OFFER_URL="https://t.me/makintoshit",
-        CHANNEL_URL="https://t.me/goosebump3s",
+        OFFER_URL=_env("OFFER_URL", "https://t.me/your_offer_channel"),
+        CHANNEL_URL=_env("CHANNEL_URL", "https://t.me/your_channel"),
 
-        SUPPORT_URL="https://t.me/makintoshit",
-        REQUESTS_CHANNEL_URL="https://t.me/goosebump3s",
-        ADS_URL="https://t.me/makintoshit",
+        SUPPORT_URL=_env("SUPPORT_URL", "https://t.me/your_support"),
+        REQUESTS_CHANNEL_URL=_env("REQUESTS_CHANNEL_URL", "https://t.me/your_requests_channel"),
+        ADS_URL=_env("ADS_URL", "https://t.me/your_ads_channel"),
 
         # ворк-чат с модерацией
-        MODERATION_CHAT_ID=-1003236074223,
-        MODERATION_TOPIC_ID=11,
-        REPORTS_TOPIC_ID=10,
+        MODERATION_CHAT_ID=_env_int("MODERATION_CHAT_ID"),
+        MODERATION_TOPIC_ID=_env_optional_int("MODERATION_TOPIC_ID"),
+        REPORTS_TOPIC_ID=_env_optional_int("REPORTS_TOPIC_ID"),
 
         # канал с заявками
-        REQUESTS_PUBLIC_CHANNEL_ID=-1003026579376,
+        REQUESTS_PUBLIC_CHANNEL_ID=_env_int("REQUESTS_PUBLIC_CHANNEL_ID"),
 
         # канал с баннерами
-        ASSETS_CHANNEL_ID=-1003292119994,
-        PROFILE_BANNER_MESSAGE_ID=4,
-        MY_REQUESTS_BANNER_MESSAGE_ID=2,
-        REQUEST_SENT_BANNER_MESSAGE_ID=3,
-        MY_OFFERS_BANNER_MESSAGE_ID=5,  # <- по твоей просьбе
-        START_BANNER_ID=6,
+        ASSETS_CHANNEL_ID=_env_optional_int("ASSETS_CHANNEL_ID"),
+        PROFILE_BANNER_MESSAGE_ID=_env_optional_int("PROFILE_BANNER_MESSAGE_ID"),
+        MY_REQUESTS_BANNER_MESSAGE_ID=_env_optional_int("MY_REQUESTS_BANNER_MESSAGE_ID"),
+        REQUEST_SENT_BANNER_MESSAGE_ID=_env_optional_int("REQUEST_SENT_BANNER_MESSAGE_ID"),
+        MY_OFFERS_BANNER_MESSAGE_ID=_env_optional_int("MY_OFFERS_BANNER_MESSAGE_ID"),
+        START_BANNER_ID=_env_optional_int("START_BANNER_ID"),
 
-        MANAGER_REQUISITES_TEXT=(
-            "Реквизиты менеджера для оплаты залога:\n"
-            "ФИО: Широков Владислав Дмитриевич\n"
-            "Номер карты: 0000 0000 0000 0000\n"
-            "Банк: Название банка"
+        MANAGER_REQUISITES_TEXT=_env(
+            "MANAGER_REQUISITES_TEXT",
+            "Реквизиты менеджера для оплаты залога укажите в .env",
         ),
 
-        MANAGER_CDEK_CONTACT_TEXT=(
-            "Контактные данные для отправки товара менеджеру через CDEK:\n"
-            "1. Номер: 79998623067\n"
-            "2. Адрес отделения: Москва, улица Черняховского, 5, корп. 2.\n"
-            "3. ФИО: Широков Владислав Дмитриевич\n\n"
-            "Внимание! Оплатите доставку до менеджера самостоятельно, "
-            "в ином случае посылка не будет принята."
+        MANAGER_CDEK_CONTACT_TEXT=_env(
+            "MANAGER_CDEK_CONTACT_TEXT",
+            "Контактные данные менеджера для CDEK укажите в .env",
         ),
 
-        SUPPORT_USERNAME="userpodderzhki",
+        SUPPORT_USERNAME=_env("SUPPORT_USERNAME", "your_support_username"),
     )
