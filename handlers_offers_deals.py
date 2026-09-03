@@ -9,7 +9,7 @@ from config import Config
 from db import Database
 from keyboards import Keyboards
 from states import OfferCreate, DealTrack, DealArrivalPhoto, DealManagerTrack
-from utils import safe_username, build_request_link
+from utils import build_request_link, work_chat_user
 
 
 DEAL_STATUS_STEPS = [
@@ -36,12 +36,13 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         bot = payload["bot"]
         buyer_id = payload["buyer_id"]
         offer_id = payload["offer_id"]
+        request_id = payload["request_id"]
         manager_chat_id = payload["manager_chat_id"]
         manager_state = payload["state"]
         photos = payload["photos"]
 
         caption = (
-            f"Товар по сделке №{offer_id} прибыл.\n"
+            f"Товар по сделке №{request_id} прибыл.\n"
             "Проверьте соответствие сделки и выберите действие."
         )
 
@@ -122,11 +123,11 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         buyer_deposit = base_price * 0.2675
         seller_deposit = base_price * 0.0535
 
-        buyer_username = safe_username(
+        buyer_username = work_chat_user(
             buyer_user.get("username") if buyer_user else None,
             buyer_id,
         )
-        seller_username = safe_username(
+        seller_username = work_chat_user(
             seller_user.get("username") if seller_user else None,
             seller_id,
         )
@@ -157,12 +158,10 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             f"• Название: {fmt(item_name)}\n"
             f"• Описание: {fmt(description)}\n\n"
             "Покупатель:\n"
-            f"ID: {buyer_id:07d}\n"
             f"User: {buyer_username}\n\n"
             f"Количество откликов: {offers_count}\n\n"
             "Принятый отклик:\n"
             "Продавец:\n"
-            f"ID:{seller_id:07d}\n"
             f"User: {seller_username}\n\n"
             f"Общая сумма сделки: {buyer_total:.2f}₽\n"
             f"Сумма которую получает продавец: {base_price:.2f}₽\n"
@@ -193,9 +192,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         deal_link = build_request_link(cfg, req) or ""
         if deal_link:
-            deal_text = f'<a href="{deal_link}">Сделка №{offer_id}</a>'
+            deal_text = f'<a href="{deal_link}">Сделка №{offer['request_id']}</a>'
         else:
-            deal_text = f"Сделка №{offer_id}"
+            deal_text = f"Сделка №{offer['request_id']}"
 
         block = (
             f"Сумма за которую продавец продает: {base_price:.2f} руб.\n"
@@ -215,7 +214,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             f"Сумма товара: {buyer_total:.0f}₽.\n"
             f"Ваш залог (25%): {buyer_deposit:.0f}₽.\n\n"
             f"{buyer_requisites_text}\n\n"
-            f"Укажите в комментарии к платежу «№{offer_id}».\n\n"
+            f"Укажите в комментарии к платежу «№{offer['request_id']}».\n\n"
             "После оплаты нажмите кнопку «Оплатил»."
         )
 
@@ -226,7 +225,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             f"Сумма сделки: {buyer_total:.0f}₽.\n"
             f"Ваш залог (5%): {seller_deposit:.0f}₽.\n\n"
             f"{seller_requisites_text}\n\n"
-            f"Укажите в комментарии «№{offer_id}».\n\n"
+            f"Укажите в комментарии «№{offer['request_id']}».\n\n"
             "После оплаты нажмите кнопку «Оплатил»."
         )
 
@@ -374,9 +373,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         deal_link = build_request_link(cfg, req) or ""
         if deal_link:
-            deal_text = f'<a href="{deal_link}">Сделка №{offer_id}</a>'
+            deal_text = f'<a href="{deal_link}">Сделка №{offer['request_id']}</a>'
         else:
-            deal_text = f"Сделка №{offer_id}"
+            deal_text = f"Сделка №{offer['request_id']}"
 
         base_price = offer["price_cents"] / 100.0
         buyer_total = base_price * 1.07
@@ -555,7 +554,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         try:
             await cq.bot.send_message(
                 chat_id=offer["buyer_id"],
-                text=f"Покупатель отклонил отклик по сделке №{offer_id}.",
+                text=f"Покупатель отклонил отклик по сделке №{offer['request_id']}.",
             )
         except Exception:
             pass
@@ -641,7 +640,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         text = (
             f"Поступил запрос проверки оплаты залога от стороны: {side}\n"
-            f"Сделка #{offer_id}, заявка №{offer['request_id']}.\n"
+            f"Сделка №{offer['request_id']}.\n"
             f"Сумма залога к оплате: {amount:.2f} руб.\n"
             f"Сумма товара: {buyer_total:.2f} руб."
         )
@@ -701,17 +700,17 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             try:
                 if side == "buyer":
                     text = (
-                        f"Оплата залога покупателя по Сделке №{offer_id} "
+                        f"Оплата залога покупателя по Сделке №{offer['request_id']} "
                         "подтверждена модератором."
                     )
                 elif side == "seller":
                     text = (
-                        f"Оплата залога продавца по Сделке №{offer_id} "
+                        f"Оплата залога продавца по Сделке №{offer['request_id']} "
                         "подтверждена модератором."
                     )
                 else:
                     text = (
-                        f"Оплата остатка по сделке №{offer_id} подтверждена. "
+                        f"Оплата остатка по сделке №{offer['request_id']} подтверждена. "
                         "Спасибо за пользование сервисом, ждем вас снова!"
                     )
                 await cq.bot.send_message(
@@ -733,7 +732,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             )
             moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
             manager_text = (
-                f"Финальная оплата подтверждена по сделке №{offer_id}.\n\n"
+                f"Финальная оплата подтверждена по сделке №{offer['request_id']}.\n\n"
                 f"Сумма к отправке продавцу (с залогом): {total_to_send:.2f} руб.\n\n"
                 "Реквизиты продавца:\n"
                 f"{seller_req_text}"
@@ -823,7 +822,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                 chat_id=target_id,
                 text=(
                     f"Оплата {'остатка' if side == 'final' else 'залога'} "
-                    f"({side}) по сделке №{offer_id} не прошла. "
+                    f"({side}) по сделке №{offer['request_id']} не прошла. "
                     "Проверьте данные и попробуйте ещё раз."
                 ),
             )
@@ -859,7 +858,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, msg.bot)
         text = (
-            f"Продавец указал трек-номер по сделке №{offer_id}:\n"
+            f"Продавец указал трек-номер по сделке №{offer['request_id']}:\n"
             f"{track}"
         )
         if moderation_thread_id:
@@ -897,7 +896,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
         arrival_text = (
-            f"Трек-номер по сделке №{offer_id} одобрен.\n"
+            f"Трек-номер по сделке №{offer['request_id']} одобрен.\n"
             "Проверьте товар и выберите действие."
         )
         if moderation_thread_id:
@@ -959,7 +958,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         await state.set_state(DealArrivalPhoto.waiting_for_photo)
         await state.update_data(offer_id=offer_id)
         await cq.message.answer(
-            f"Пришлите фото товара по сделке №{offer_id} одним сообщением.",
+            f"Пришлите фото товара по сделке №{offer['request_id']} одним сообщением.",
         )
         try:
             await cq.message.edit_reply_markup(reply_markup=None)
@@ -981,7 +980,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         seller_id = offer["buyer_id"]
 
         dispute_text = (
-            f"По сделке №{offer_id} открыт спор. "
+            f"По сделке №{offer['request_id']} открыт спор. "
             f"Свяжитесь с поддержкой: @{cfg.SUPPORT_USERNAME}."
         )
         for target_id in (buyer_id, seller_id):
@@ -1032,6 +1031,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                     "bot": msg.bot,
                     "buyer_id": buyer_id,
                     "offer_id": offer_id,
+                    "request_id": offer["request_id"],
                     "manager_chat_id": msg.chat.id,
                     "state": state,
                     "photos": [],
@@ -1047,7 +1047,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             return
 
         caption = (
-            f"Товар по сделке №{offer_id} прибыл.\n"
+            f"Товар по сделке №{offer['request_id']} прибыл.\n"
             "Проверьте соответствие сделки и выберите действие."
         )
         try:
@@ -1077,10 +1077,10 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         remainder = max(buyer_total - buyer_deposit, 0)
 
         text = (
-            f"✅ Вы подтвердили получение товара по сделке №{offer_id}.\n\n"
+            f"✅ Вы подтвердили получение товара по сделке №{offer['request_id']}.\n\n"
             f"Остаток к оплате: {remainder:.2f} руб.\n\n"
             f"{cfg.MANAGER_REQUISITES_TEXT}\n\n"
-            f"Укажите в комментарии «№{offer_id}».\n\n"
+            f"Укажите в комментарии «№{offer['request_id']}».\n\n"
             "После оплаты нажмите кнопку «Оплатил остаток»."
         )
         try:
@@ -1110,8 +1110,8 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         await db.set_offer_status(offer_id, "dispute")
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
         dispute_text = (
-            f"Покупатель открыл спор по сделке №{offer_id}.\n"
-            f"Покупатель: {safe_username(cq.from_user.username, cq.from_user.id)}"
+            f"Покупатель открыл спор по сделке №{offer['request_id']}.\n"
+            f"Покупатель: {work_chat_user(cq.from_user.username, cq.from_user.id)}"
         )
         if moderation_thread_id:
             await cq.bot.send_message(
@@ -1128,7 +1128,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         try:
             await cq.bot.send_message(
                 chat_id=cq.from_user.id,
-                text=f"Спор по сделке №{offer_id} открыт. "
+                text=f"Спор по сделке №{offer['request_id']} открыт. "
                      f"Свяжитесь с поддержкой: @{cfg.SUPPORT_USERNAME}.",
             )
         except Exception:
@@ -1158,7 +1158,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         remainder = max(buyer_total - buyer_deposit, 0)
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
         text = (
-            f"Поступил запрос проверки финальной оплаты по сделке №{offer_id}.\n"
+            f"Поступил запрос проверки финальной оплаты по сделке №{offer['request_id']}.\n"
             f"Сумма к оплате: {remainder:.2f} руб."
         )
         if moderation_thread_id:
@@ -1196,7 +1196,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         try:
             await cq.bot.send_message(
                 chat_id=seller_id,
-                text=f"Оплата за заказ №{offer_id} отправлена вместе с залогом по вашим реквизитам.",
+                text=f"Оплата за заказ №{offer['request_id']} отправлена вместе с залогом по вашим реквизитам.",
             )
         except Exception:
             pass
@@ -1247,7 +1247,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             try:
                 await cq.bot.send_message(
                     chat_id=seller_id,
-                    text=f"Покупатель оценил вас на {rating}⭐ по сделке №{offer_id}.",
+                    text=f"Покупатель оценил вас на {rating}⭐ по сделке №{offer['request_id']}.",
                 )
             except Exception:
                 pass
@@ -1269,11 +1269,11 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         await db.set_delivery_method(offer_id, "cdek")
         cdek = await db.get_cdek_contacts(cq.from_user.id) or {}
         cdek_text = (
-            f"Покупатель выбрал CDEK по сделке №{offer_id}.\n\n"
+            f"Покупатель выбрал CDEK по сделке №{offer['request_id']}.\n\n"
             f"ФИО: {cdek.get('fio') or '—'}\n"
             f"Телефон: {cdek.get('phone') or '—'}\n"
             f"ПВЗ: {cdek.get('pvz') or '—'}\n"
-            f"Покупатель: {safe_username(cq.from_user.username, cq.from_user.id)}"
+            f"Покупатель: {work_chat_user(cq.from_user.username, cq.from_user.id)}"
         )
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
         if moderation_thread_id:
@@ -1307,8 +1307,8 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         await db.set_delivery_method(offer_id, "self")
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
         info_text = (
-            f"Покупатель выбрал самовывоз по сделке №{offer_id}.\n"
-            f"Покупатель: {safe_username(cq.from_user.username, cq.from_user.id)}"
+            f"Покупатель выбрал самовывоз по сделке №{offer['request_id']}.\n"
+            f"Покупатель: {work_chat_user(cq.from_user.username, cq.from_user.id)}"
         )
         if moderation_thread_id:
             await cq.bot.send_message(
@@ -1347,7 +1347,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         await state.set_state(DealManagerTrack.waiting_for_track)
         await state.update_data(offer_id=offer_id)
         await cq.message.answer(
-            f"Отправка по CDEK отмечена. Пришлите трек-код по сделке №{offer_id}.",
+            f"Отправка по CDEK отмечена. Пришлите трек-код по сделке №{offer['request_id']}.",
         )
         try:
             await cq.message.edit_reply_markup(reply_markup=None)
@@ -1377,7 +1377,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             try:
                 await msg.bot.send_message(
                     chat_id=buyer_id,
-                    text=f"Ваш трек-код по сделке №{offer_id}: {track}",
+                    text=f"Ваш трек-код по сделке №{offer['request_id']}: {track}",
                 )
             except Exception:
                 pass
@@ -1425,7 +1425,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         try:
             await cq.bot.send_message(
                 chat_id=buyer_id,
-                text=f"Продавец отменил сделку №{offer_id}.",
+                text=f"Продавец отменил сделку №{offer['request_id']}.",
             )
         except Exception:
             pass
@@ -1433,7 +1433,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         try:
             await cq.bot.send_message(
                 chat_id=seller_id,
-                text=f"Вы отменили сделку №{offer_id}. Залог будет передан покупателю.",
+                text=f"Вы отменили сделку №{offer['request_id']}. Залог будет передан покупателю.",
             )
         except Exception:
             pass

@@ -6,7 +6,7 @@ from config import Config
 from db import Database
 from keyboards import Keyboards
 from states import RequestCreate
-from utils import safe_username, build_direct_link
+from utils import build_direct_link, work_chat_user
 
 
 def setup_requests_handlers(router: Router, db: Database, cfg: Config):
@@ -134,7 +134,7 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
 
         text = (
             f"Новый запрос #{request_id}\n"
-            f"От: {safe_username(user.username, user.id)} (id {user.id})\n\n"
+            f"От: {work_chat_user(user.username, user.id)}\n\n"
             f"{data['internal_title']}\n\n"
             f"Что нужно: {data['item_name']}\n\n"
             f"Описание:\n{data['description']}"
@@ -181,7 +181,7 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
 
         caption = (
             f"Новый запрос #{request_id}\n"
-            f"От: {safe_username(user.username, user.id)} (id {user.id})\n\n"
+            f"От: {work_chat_user(user.username, user.id)}\n\n"
             f"{data['internal_title']}\n\n"
             f"Что нужно: {data['item_name']}\n\n"
             f"Описание:\n{data['description']}"
