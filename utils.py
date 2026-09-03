@@ -12,6 +12,11 @@ def safe_username(username: Optional[str], user_id: Optional[int] = None) -> str
     return f"id{user_id}" if user_id else "Пользователь"
 
 
+def work_chat_user(username: Optional[str], user_id: int) -> str:
+    """Format a user tag together with their ID for internal work-chat messages."""
+    return f"{safe_username(username, user_id)} (id {user_id})"
+
+
 def _internal_chat_id(chat_id: int) -> str:
     s = str(chat_id)
     if s.startswith("-100"):

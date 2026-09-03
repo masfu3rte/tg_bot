@@ -6,7 +6,7 @@ from config import Config
 from db import Database
 from keyboards import Keyboards
 from states import ProfileEdit
-from utils import safe_username
+from utils import safe_username, work_chat_user
 
 
 def setup_profile_handlers(router: Router, db: Database, cfg: Config):
@@ -121,7 +121,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         )
         request_text = (
             "Запрос на вывод реферальных средств.\n"
-            f"Пользователь: {safe_username(cq.from_user.username, user_id)} (id {user_id})\n"
+            f"Пользователь: {work_chat_user(cq.from_user.username, user_id)}\n"
             f"Сумма: {amount:.2f} руб.\n\n"
             "Банковские реквизиты:\n"
             f"{req_text}"

@@ -229,7 +229,7 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
         index, total = await db.get_offer_index_and_total(user_id, offer["id"])
         req = await db.get_request(offer["request_id"]) or {}
         link = build_request_link(cfg, req) or ""
-        deal_line = f'<a href="{link}">Сделка №{offer["id"]}</a>' if link else f"Сделка №{offer['id']}"
+        deal_line = f'<a href="{link}">Сделка №{offer["request_id"]}</a>' if link else f"Сделка №{offer['request_id']}"
 
         base_price = offer["price_cents"] / 100.0
         created_at = offer.get("created_at")
@@ -339,11 +339,11 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             return
         idx = max(1, offer["deal_status"] or 1)
         req = await db.get_request(offer["request_id"]) or {}
-        link = build_request_link(cfg, req) or f"Сделка №{offer_id}"
+        link = build_request_link(cfg, req) or f"Сделка №{offer['request_id']}"
 
         text = (
             f"{link}\n"
-            f"Статус сделки №{offer_id}.\n"
+            f"Статус сделки №{offer['request_id']}.\n"
             "Выберите нужный статус из списка ниже."
         )
         await cq.message.answer(
@@ -401,7 +401,7 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             await cq.bot.send_message(
                 chat_id=cfg.MODERATION_CHAT_ID,
                 message_thread_id=cfg.MODERATION_TOPIC_ID,
-                text=f"Продавец поставил статус «Товар в пути до менеджера» по сделке №{offer_id}.",
+                text=f"Продавец поставил статус «Товар в пути до менеджера» по сделке №{offer['request_id']}.",
             )
             moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
             if moderation_thread_id and moderation_thread_id != cfg.MODERATION_TOPIC_ID:
@@ -411,7 +411,7 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
                         message_thread_id=moderation_thread_id,
                         text=(
                             "Продавец поставил статус «Товар в пути до менеджера» "
-                            f"по сделке №{offer_id}."
+                            f"по сделке №{offer['request_id']}."
                         ),
                     )
                 except Exception:
@@ -421,14 +421,14 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             try:
                 await cq.bot.send_message(
                     chat_id=buyer_id,
-                    text=f"Статус вашей сделки №{offer_id} изменён на: {status_name}.",
+                    text=f"Статус вашей сделки №{offer['request_id']} изменён на: {status_name}.",
                 )
             except Exception:
                 pass
 
         try:
             await cq.message.edit_text(
-                f"Статус сделки №{offer_id}.\n"
+                f"Статус сделки №{offer['request_id']}.\n"
                 "Выберите нужный статус из списка ниже.",
                 reply_markup=Keyboards.deal_status_menu_kb(
                     offer_id, idx, DEAL_STATUS_STEPS
