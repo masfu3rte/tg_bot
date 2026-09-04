@@ -86,11 +86,82 @@ class Database:
                 ("manager_track_number", "TEXT"),
                 ("delivery_method", "TEXT"),
                 ("seller_rating", "INTEGER"),
+                # Deal-reporting fields.  ``buyer_id`` above is the author of the
+                # offer (the seller), so the actual buyer is stored explicitly.
+                ("deal_buyer_id", "INTEGER"),
+                ("seller_id", "INTEGER"),
+                ("buyer_username", "TEXT"),
+                ("seller_username", "TEXT"),
+                ("amount_cents", "INTEGER"),
+                ("service_fee_cents", "INTEGER"),
+                ("seller_payout_cents", "INTEGER"),
+                ("paid_at", "TEXT"),
+                ("completed_at", "TEXT"),
+                ("cancelled_at", "TEXT"),
+                ("final_status", "TEXT"),
+                ("is_disputed", "INTEGER NOT NULL DEFAULT 0"),
+                ("dispute_result", "TEXT"),
             ],
         }
 
         for table_name, columns in schemas.items():
             self._ensure_table_schema(table_name, columns)
+
+        self._backfill_deal_statistics()
+
+    def _backfill_deal_statistics(self) -> None:
+        """Populate reporting fields for deals created before this migration."""
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            UPDATE offers
+               SET deal_buyer_id = COALESCE(
+                       deal_buyer_id,
+                       (SELECT user_id FROM requests WHERE requests.id=offers.request_id)
+                   ),
+                   seller_id = COALESCE(seller_id, buyer_id),
+                   buyer_username = COALESCE(
+                       buyer_username,
+                       (SELECT username FROM users WHERE users.user_id=(
+                           SELECT user_id FROM requests WHERE requests.id=offers.request_id
+                       ))
+                   ),
+                   seller_username = COALESCE(
+                       seller_username,
+                       (SELECT username FROM users WHERE users.user_id=offers.buyer_id)
+                   ),
+                   service_fee_cents = COALESCE(service_fee_cents, ROUND(price_cents * 0.07)),
+                   seller_payout_cents = COALESCE(seller_payout_cents, price_cents),
+                   amount_cents = COALESCE(
+                       amount_cents, price_cents + ROUND(price_cents * 0.07)
+                   ),
+                   paid_at = CASE
+                       WHEN paid_at IS NULL AND buyer_deposit_status='confirmed'
+                       THEN created_at ELSE paid_at END,
+                   completed_at = CASE
+                       WHEN completed_at IS NULL AND final_payment_status='confirmed'
+                       THEN created_at ELSE completed_at END,
+                   final_status = COALESCE(
+                       final_status,
+                       CASE
+                           WHEN final_payment_status='confirmed' THEN 'completed'
+                           WHEN status='closed_by_seller' THEN 'cancelled'
+                           WHEN status='buyer_rejected' THEN 'cancelled'
+                           WHEN status='dispute' THEN 'dispute'
+                           ELSE status
+                       END
+                   ),
+                   is_disputed = CASE WHEN status='dispute' THEN 1 ELSE is_disputed END
+             WHERE status IN (
+                       'approved', 'buyer_accepted', 'buyer_rejected',
+                       'dispute', 'closed_by_seller'
+                   )
+                OR buyer_deposit_status='confirmed'
+                OR seller_deposit_status='confirmed'
+                OR final_payment_status='confirmed'
+            """
+        )
+        self.conn.commit()
 
     def _ensure_table_schema(self, table_name: str, columns: list[tuple[str, str]]) -> None:
         cur = self.conn.cursor()
@@ -438,7 +509,7 @@ class Database:
         new_users = cur.fetchone()["cnt"]
 
         offers_filter, offers_params = build_date_filter("created_at")
-        offers_sql = "SELECT COUNT(*) AS cnt FROM offers WHERE status='approved'"
+        offers_sql = "SELECT COUNT(*) AS cnt FROM offers WHERE deal_buyer_id IS NOT NULL"
         if offers_filter:
             offers_sql += f" AND {offers_filter}"
         cur.execute(offers_sql, offers_params)
@@ -447,6 +518,78 @@ class Database:
         return {
             "new_users": new_users,
             "new_deals": new_deals,
+        }
+
+    @staticmethod
+    def _report_period_filter(
+        start_dt: Optional[datetime], end_dt: Optional[datetime]
+    ) -> Tuple[str, list[str]]:
+        # Completed deals belong to the period by completed_at, cancelled deals by
+        # cancelled_at, and open deals by created_at (their only final event so far).
+        event_column = (
+            "CASE WHEN completed_at IS NOT NULL THEN completed_at "
+            "WHEN cancelled_at IS NOT NULL THEN cancelled_at ELSE created_at END"
+        )
+        clauses = ["deal_buyer_id IS NOT NULL"]
+        params: list[str] = []
+        if start_dt:
+            clauses.append(f"{event_column} >= ?")
+            params.append(start_dt.strftime("%Y-%m-%d %H:%M:%S"))
+        if end_dt:
+            clauses.append(f"{event_column} < ?")
+            params.append(end_dt.strftime("%Y-%m-%d %H:%M:%S"))
+        return " AND ".join(clauses), params
+
+    async def get_completed_deals_for_period(
+        self, start_dt: Optional[datetime], end_dt: Optional[datetime]
+    ) -> list[Dict[str, Any]]:
+        """Return every deal assigned to a reporting period (name kept for API clarity)."""
+        where, params = self._report_period_filter(start_dt, end_dt)
+        cur = self.conn.cursor()
+        cur.execute(
+            f"""
+            SELECT id, deal_buyer_id AS buyer_id, seller_id,
+                   buyer_username, seller_username, amount_cents,
+                   service_fee_cents, seller_payout_cents, created_at, paid_at,
+                   completed_at, cancelled_at,
+                   COALESCE(final_status, status) AS status,
+                   is_disputed, dispute_result,
+                   CASE WHEN completed_at IS NOT NULL
+                        THEN CAST((julianday(completed_at)-julianday(created_at))*86400 AS INTEGER)
+                   END AS duration_seconds
+              FROM offers
+             WHERE {where}
+             ORDER BY COALESCE(completed_at, cancelled_at, created_at), id
+            """,
+            params,
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    async def get_deals_statistics(
+        self, start_dt: Optional[datetime], end_dt: Optional[datetime]
+    ) -> Dict[str, Any]:
+        deals = await self.get_completed_deals_for_period(start_dt, end_dt)
+        completed = [d for d in deals if d["status"] == "completed"]
+        cancelled = [d for d in deals if d["status"] == "cancelled"]
+        terminal_statuses = {"completed", "cancelled", "refunded", "closed_by_seller"}
+        terminal = [d for d in deals if d["status"] in terminal_statuses]
+        durations = [d["duration_seconds"] for d in completed if d["duration_seconds"] is not None]
+        turnover = sum(d["amount_cents"] or 0 for d in completed)
+        fees = sum(d["service_fee_cents"] or 0 for d in completed)
+        payouts = sum(d["seller_payout_cents"] or 0 for d in completed)
+        return {
+            "deals": deals,
+            "active_deals_count": sum(d["status"] not in terminal_statuses for d in deals),
+            "completed_deals_count": len(completed),
+            "cancelled_deals_count": len(cancelled),
+            "disputed_deals_count": sum(bool(d["is_disputed"]) for d in deals),
+            "turnover_cents": turnover,
+            "service_fee_cents": fees,
+            "seller_payout_cents": payouts,
+            "average_check_cents": round(turnover / len(completed)) if completed else 0,
+            "average_fee_cents": round(fees / len(completed)) if completed else 0,
+            "average_duration_seconds": round(sum(durations) / len(durations)) if durations else 0,
+            "success_percentage": (len(completed) / len(terminal) * 100) if terminal else 0.0,
         }
 
     async def get_active_deals_summary(self) -> Dict[str, int]:
@@ -752,7 +895,59 @@ class Database:
 
     async def set_offer_status(self, offer_id: int, status: str):
         cur = self.conn.cursor()
-        cur.execute("UPDATE offers SET status=? WHERE id=?", (status, offer_id))
+        if status == "approved":
+            cur.execute(
+                """
+                UPDATE offers
+                   SET status=?,
+                       deal_buyer_id=(SELECT user_id FROM requests WHERE id=offers.request_id),
+                       seller_id=buyer_id,
+                       buyer_username=(SELECT username FROM users WHERE user_id=(
+                           SELECT user_id FROM requests WHERE id=offers.request_id)),
+                       seller_username=(SELECT username FROM users WHERE user_id=offers.buyer_id),
+                       service_fee_cents=ROUND(price_cents * 0.07),
+                       seller_payout_cents=price_cents,
+                       amount_cents=price_cents + ROUND(price_cents * 0.07),
+                       final_status='approved'
+                 WHERE id=?
+                """,
+                (status, offer_id),
+            )
+        elif status == "dispute":
+            cur.execute(
+                "UPDATE offers SET status=?, final_status='dispute', is_disputed=1 WHERE id=?",
+                (status, offer_id),
+            )
+        elif status in {"closed_by_seller", "buyer_rejected", "cancelled", "refunded"}:
+            final_status = "cancelled" if status in {"closed_by_seller", "buyer_rejected"} else status
+            cur.execute(
+                """UPDATE offers SET status=?, final_status=?,
+                          cancelled_at=COALESCE(cancelled_at, CURRENT_TIMESTAMP),
+                          dispute_result=CASE WHEN is_disputed=1
+                              THEN COALESCE(dispute_result, ?) ELSE dispute_result END
+                     WHERE id=?""",
+                (status, final_status, final_status, offer_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE offers SET status=?, final_status=? WHERE id=?",
+                (status, status, offer_id),
+            )
+        self.conn.commit()
+
+    async def update_deal_statistics(
+        self, offer_id: int, *, dispute_result: Optional[str] = None,
+        final_status: Optional[str] = None
+    ) -> None:
+        """Record a moderator-supplied dispute outcome without bypassing transitions."""
+        cur = self.conn.cursor()
+        cur.execute(
+            """UPDATE offers
+                  SET dispute_result=COALESCE(?, dispute_result),
+                      final_status=COALESCE(?, final_status)
+                WHERE id=?""",
+            (dispute_result, final_status, offer_id),
+        )
         self.conn.commit()
 
     async def set_offer_moderation_thread_id(self, offer_id: int, thread_id: int):
@@ -766,8 +961,11 @@ class Database:
     async def set_buyer_deposit_status(self, offer_id: int, status: str):
         cur = self.conn.cursor()
         cur.execute(
-            "UPDATE offers SET buyer_deposit_status=? WHERE id=?",
-            (status, offer_id),
+            """UPDATE offers SET buyer_deposit_status=?,
+                      paid_at=CASE WHEN ?='confirmed' THEN COALESCE(paid_at, CURRENT_TIMESTAMP)
+                                   ELSE paid_at END
+                 WHERE id=?""",
+            (status, status, offer_id),
         )
         self.conn.commit()
 
@@ -813,8 +1011,16 @@ class Database:
     async def set_final_payment_status(self, offer_id: int, status: str):
         cur = self.conn.cursor()
         cur.execute(
-            "UPDATE offers SET final_payment_status=? WHERE id=?",
-            (status, offer_id),
+            """UPDATE offers SET final_payment_status=?,
+                      paid_at=CASE WHEN ?='confirmed'
+                          THEN COALESCE(paid_at, CURRENT_TIMESTAMP) ELSE paid_at END,
+                      completed_at=CASE WHEN ?='confirmed'
+                          THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE completed_at END,
+                      final_status=CASE WHEN ?='confirmed' THEN 'completed' ELSE final_status END,
+                      dispute_result=CASE WHEN ?='confirmed' AND is_disputed=1
+                          THEN COALESCE(dispute_result, 'completed') ELSE dispute_result END
+                 WHERE id=?""",
+            (status, status, status, status, status, offer_id),
         )
         self.conn.commit()
 
