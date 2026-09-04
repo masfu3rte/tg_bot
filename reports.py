@@ -9,7 +9,7 @@ from aiogram.types import FSInputFile
 
 from config import Config
 from db import Database
-from utils import write_simple_xlsx
+from utils import write_report_xlsx
 
 
 def _format_period_label(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> str:
@@ -20,6 +20,24 @@ def _format_period_label(start_dt: Optional[datetime], end_dt: Optional[datetime
     if start_dt:
         return f"с {start_dt:%d.%m.%Y}"
     return f"до {end_dt:%d.%m.%Y}"
+
+
+def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_duration(seconds: Optional[int]) -> str:
+    if seconds is None:
+        return ""
+    days, remainder = divmod(max(0, seconds), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes = remainder // 60
+    return f"{days} д. {hours:02d}:{minutes:02d}"
 
 
 async def _send_report(
@@ -40,24 +58,55 @@ async def _send_report(
         return
 
     stats = await db.get_report_stats(start_dt, end_dt)
-    active = await db.get_active_deals_summary()
-
-    active_sum_rub = active["active_deals_sum_cents"] / 100.0
+    deal_stats = await db.get_deals_statistics(start_dt, end_dt)
     period_label = _format_period_label(start_dt, end_dt)
 
     rows = [
         ("Период", period_label),
         ("Новых пользователей", stats["new_users"]),
         ("Новых сделок", stats["new_deals"]),
-        ("Активных сделок", active["active_deals_count"]),
-        ("Сумма активных сделок (руб.)", f"{active_sum_rub:.2f}"),
+        ("Активных сделок", deal_stats["active_deals_count"]),
+        ("Завершенных сделок", deal_stats["completed_deals_count"]),
+        ("Отмененных сделок", deal_stats["cancelled_deals_count"]),
+        ("Спорных сделок", deal_stats["disputed_deals_count"]),
+        ("Общий оборот завершенных сделок", deal_stats["turnover_cents"] / 100),
+        ("Общая комиссия сервиса", deal_stats["service_fee_cents"] / 100),
+        ("Сумма выплат продавцам", deal_stats["seller_payout_cents"] / 100),
+        ("Средний чек", deal_stats["average_check_cents"] / 100),
+        ("Средняя комиссия", deal_stats["average_fee_cents"] / 100),
+        ("Среднее время завершения сделки", _format_duration(deal_stats["average_duration_seconds"])),
+        ("Процент успешно завершенных сделок", deal_stats["success_percentage"]),
     ]
+
+    deal_rows = [[
+        "ID", "Дата создания", "Дата оплаты", "Дата завершения",
+        "Покупатель Telegram ID", "Покупатель username",
+        "Продавец Telegram ID", "Продавец username", "Сумма сделки",
+        "Комиссия", "Выплата продавцу", "Статус", "Спор",
+        "Результат спора", "Длительность сделки",
+    ]]
+    for deal in deal_stats["deals"]:
+        deal_rows.append([
+            deal["id"], _parse_datetime(deal["created_at"]),
+            _parse_datetime(deal["paid_at"]), _parse_datetime(deal["completed_at"]),
+            deal["buyer_id"], deal["buyer_username"] or "",
+            deal["seller_id"], deal["seller_username"] or "",
+            (deal["amount_cents"] or 0) / 100,
+            (deal["service_fee_cents"] or 0) / 100,
+            (deal["seller_payout_cents"] or 0) / 100,
+            deal["status"], "Да" if deal["is_disputed"] else "Нет",
+            deal["dispute_result"] or "", _format_duration(deal["duration_seconds"]),
+        ])
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         temp_path = tmp.name
 
     try:
-        write_simple_xlsx(temp_path, "Отчет", [["Показатель", "Значение"], *rows])
+        write_report_xlsx(
+            temp_path,
+            [["Показатель", "Значение"], *rows],
+            deal_rows,
+        )
         caption = f"Отчет: {report_type} ({period_label})"
         try:
             await bot.send_document(

@@ -1,6 +1,11 @@
-from typing import Optional, TYPE_CHECKING, Iterable
+from datetime import datetime
+from typing import Optional, TYPE_CHECKING, Iterable, Sequence
 from xml.sax.saxutils import escape
 import zipfile
+
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 if TYPE_CHECKING:
     from config import Config
@@ -106,3 +111,54 @@ def write_simple_xlsx(path: str, sheet_name: str, rows: Iterable[Iterable[str]])
         zf.writestr("xl/workbook.xml", workbook_xml)
         zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
         zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+
+
+def write_report_xlsx(
+    path: str,
+    summary_rows: Sequence[Sequence[object]],
+    deal_rows: Sequence[Sequence[object]],
+) -> None:
+    """Write the formatted, two-sheet deal report without changing the legacy writer."""
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = "Сводка"
+    deals = workbook.create_sheet("Сделки")
+
+    for worksheet, rows in ((summary, summary_rows), (deals, deal_rows)):
+        for row in rows:
+            worksheet.append(list(row))
+        for cell in worksheet[1]:
+            cell.font = Font(bold=True)
+        for column_cells in worksheet.columns:
+            width = min(
+                max((len(str(cell.value)) if cell.value is not None else 0) for cell in column_cells) + 2,
+                45,
+            )
+            worksheet.column_dimensions[get_column_letter(column_cells[0].column)].width = width
+
+    deals.freeze_panes = "A2"
+    if deals.max_row:
+        deals.auto_filter.ref = deals.dimensions
+
+    date_columns = (2, 3, 4)
+    money_columns = (9, 10, 11)
+    for row in deals.iter_rows(min_row=2):
+        for index in date_columns:
+            if isinstance(row[index - 1].value, datetime):
+                row[index - 1].number_format = "DD.MM.YYYY HH:MM"
+        for index in money_columns:
+            row[index - 1].number_format = '#,##0.00'
+
+    for row in summary.iter_rows(min_row=2):
+        if row[0].value in {
+            "Общий оборот завершенных сделок",
+            "Общая комиссия сервиса",
+            "Сумма выплат продавцам",
+            "Средний чек",
+            "Средняя комиссия",
+        }:
+            row[1].number_format = '#,##0.00'
+        elif row[0].value == "Процент успешно завершенных сделок":
+            row[1].number_format = '0.00"%"'
+
+    workbook.save(path)
