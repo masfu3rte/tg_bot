@@ -52,8 +52,8 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
 
         if deal:
             base_price = deal["price_cents"] / 100.0
-            buyer_total = base_price * 1.07
-            buyer_deposit = base_price * 0.2675
+            buyer_total = base_price * 1.13
+            buyer_deposit = base_price * 0.2825
             status_idx = max(0, min(len(DEAL_STATUS_STEPS) - 1, deal["deal_status"]))
             status_name = DEAL_STATUS_STEPS[status_idx]
             if deal.get("final_payment_status") == "confirmed":

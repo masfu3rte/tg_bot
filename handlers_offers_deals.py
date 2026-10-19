@@ -118,10 +118,10 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         description = req.get("description") if req else None
 
         base_price = offer["price_cents"] / 100.0
-        buyer_total = base_price * 1.07
+        buyer_total = base_price * 1.13
         service_fee = buyer_total - base_price
-        buyer_deposit = base_price * 0.2675
-        seller_deposit = base_price * 0.0535
+        buyer_deposit = base_price * 0.2825
+        seller_deposit = base_price * 0.0565
 
         buyer_username = work_chat_user(
             buyer_user.get("username") if buyer_user else None,
@@ -186,9 +186,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
     def build_deal_payment_texts(offer_id: int, offer: dict, req: dict) -> tuple[str, str]:
         base_price = offer["price_cents"] / 100.0
-        buyer_total = base_price * 1.07
-        seller_deposit = base_price * 0.0535
-        buyer_deposit = base_price * 0.2675
+        buyer_total = base_price * 1.13
+        seller_deposit = base_price * 0.0565
+        buyer_deposit = base_price * 0.2825
 
         deal_link = build_request_link(cfg, req) or ""
         if deal_link:
@@ -378,7 +378,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             deal_text = f"Сделка №{offer['request_id']}"
 
         base_price = offer["price_cents"] / 100.0
-        buyer_total = base_price * 1.07
+        buyer_total = base_price * 1.13
         seller_profile = await db.get_profile_view(seller_id)
         seller_responses_sum = seller_profile.get("responses_sum", "0.00 руб.")
         seller_completed_count = seller_profile.get("completed_responses_count", 0)
@@ -633,9 +633,9 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             await db.set_seller_deposit_status(offer_id, "pending")
 
         base_price = offer["price_cents"] / 100.0
-        buyer_total = base_price * 1.07
-        seller_deposit = base_price * 0.0535
-        buyer_deposit = base_price * 0.2675
+        buyer_total = base_price * 1.13
+        seller_deposit = base_price * 0.0565
+        buyer_deposit = base_price * 0.2825
         amount = buyer_deposit if side == "buyer" else seller_deposit
 
         text = (
@@ -689,7 +689,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             if final_status_before != "confirmed" and req:
                 referrer_id = await db.get_referrer_id(req["user_id"])
                 if referrer_id:
-                    commission_cents = int(round(offer["price_cents"] * 7 / 100))
+                    commission_cents = int(round(offer["price_cents"] * 13 / 100))
                     bonus_cents = int(round(commission_cents * 10 / 100))
                     await db.add_referral_bonus(referrer_id, bonus_cents)
         else:
@@ -722,7 +722,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         if side == "final":
             base_price = offer["price_cents"] / 100.0
-            seller_deposit = base_price * 0.0535
+            seller_deposit = base_price * 0.0565
             total_to_send = base_price + seller_deposit
             seller_req = await db.get_requisites(offer["buyer_id"]) or {}
             seller_req_text = (
@@ -1072,8 +1072,8 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             return
 
         base_price = offer["price_cents"] / 100.0
-        buyer_total = base_price * 1.07
-        buyer_deposit = base_price * 0.2675
+        buyer_total = base_price * 1.13
+        buyer_deposit = base_price * 0.2825
         remainder = max(buyer_total - buyer_deposit, 0)
 
         text = (
@@ -1153,8 +1153,8 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
 
         await db.set_final_payment_status(offer_id, "pending")
         base_price = offer["price_cents"] / 100.0
-        buyer_total = base_price * 1.07
-        buyer_deposit = base_price * 0.2675
+        buyer_total = base_price * 1.13
+        buyer_deposit = base_price * 0.2825
         remainder = max(buyer_total - buyer_deposit, 0)
         moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
         text = (

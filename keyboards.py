@@ -18,10 +18,11 @@ class Keyboards:
         )
 
     @staticmethod
-    def start_menu(offer_url: str, channel_url: str) -> InlineKeyboardMarkup:
+    def start_menu(offer_url: str, channel_url: str, privacy_policy_url: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="📄 Публичная оферта", url=offer_url)],
+                [InlineKeyboardButton(text="Политика обработки данных", url=privacy_policy_url)],
                 [InlineKeyboardButton(text="📢 Канал сервиса", url=channel_url)],
                 [InlineKeyboardButton(text="✅ Принимаю условия", callback_data="offer:accept")],
             ]

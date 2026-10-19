@@ -110,12 +110,13 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
         if not accepted:
             caption = (
                 "Перед началом использования сервиса просьба "
-                "ознакомиться с нашей публичной офертой."
+                "ознакомиться с нашей публичной офертой и политикой обработки данных."
             )
             await msg.answer(
                 caption,
                 reply_markup=Keyboards.start_menu(
                     offer_url=cfg.OFFER_URL,
+                    privacy_policy_url=cfg.PRIVACY_POLICY_URL,
                     channel_url=cfg.CHANNEL_URL,
                 ),
             )

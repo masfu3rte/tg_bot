@@ -11,6 +11,7 @@ class Config:
     DB_PATH: str
 
     OFFER_URL: str
+    PRIVACY_POLICY_URL: str
     CHANNEL_URL: str
 
     SUPPORT_URL: str
@@ -76,7 +77,8 @@ def load_config() -> Config:
         BOT_TOKEN=_required_env("BOT_TOKEN"),
         DB_PATH=_env("DB_PATH", "bot.db"),
 
-        OFFER_URL=_env("OFFER_URL", "https://t.me/your_offer_channel"),
+        OFFER_URL=_env("OFFER_URL", "https://docs.google.com/document/d/19f2BYa5_jKiOyk_7ZrsSLME_aJMMKlgDeLisjI2fEvk/edit?usp=sharing"),
+        PRIVACY_POLICY_URL=_env("PRIVACY_POLICY_URL", "https://telegra.ph/POLITIKA-OBRABOTKI-PERSONALNYH-DANNYH-SOMEOUT-10-17"),
         CHANNEL_URL=_env("CHANNEL_URL", "https://t.me/your_channel"),
 
         SUPPORT_URL=_env("SUPPORT_URL", "https://t.me/your_support"),

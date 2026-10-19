@@ -130,10 +130,10 @@ class Database:
                        seller_username,
                        (SELECT username FROM users WHERE users.user_id=offers.buyer_id)
                    ),
-                   service_fee_cents = COALESCE(service_fee_cents, ROUND(price_cents * 0.07)),
+                   service_fee_cents = COALESCE(service_fee_cents, ROUND(price_cents * 0.13)),
                    seller_payout_cents = COALESCE(seller_payout_cents, price_cents),
                    amount_cents = COALESCE(
-                       amount_cents, price_cents + ROUND(price_cents * 0.07)
+                       amount_cents, price_cents + ROUND(price_cents * 0.13)
                    ),
                    paid_at = CASE
                        WHEN paid_at IS NULL AND buyer_deposit_status='confirmed'
@@ -905,9 +905,9 @@ class Database:
                        buyer_username=(SELECT username FROM users WHERE user_id=(
                            SELECT user_id FROM requests WHERE id=offers.request_id)),
                        seller_username=(SELECT username FROM users WHERE user_id=offers.buyer_id),
-                       service_fee_cents=ROUND(price_cents * 0.07),
+                       service_fee_cents=ROUND(price_cents * 0.13),
                        seller_payout_cents=price_cents,
-                       amount_cents=price_cents + ROUND(price_cents * 0.07),
+                       amount_cents=price_cents + ROUND(price_cents * 0.13),
                        final_status='approved'
                  WHERE id=?
                 """,
