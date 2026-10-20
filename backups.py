@@ -5,6 +5,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 import gzip
 import hashlib
+from importlib import import_module
 import logging
 import os
 from pathlib import Path
@@ -16,8 +17,6 @@ import tempfile
 import time
 from uuid import uuid4
 
-import pyrage
-
 from config import BackupConfig, load_backup_config
 
 
@@ -28,6 +27,16 @@ class BackupError(RuntimeError):
     pass
 
 
+def load_encryption_module():
+    try:
+        return import_module("pyrage")
+    except ImportError:
+        raise BackupError(
+            "Недоступен модуль шифрования pyrage. Установите зависимости командой "
+            "python -m pip install -r requirements.txt, используя Python из окружения бота."
+        ) from None
+
+
 def validate_config(cfg: BackupConfig) -> None:
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]*", cfg.remote):
         raise BackupError("BACKUP_RCLONE_REMOTE должна содержать имя remote rclone без двоеточия.")
@@ -35,6 +44,7 @@ def validate_config(cfg: BackupConfig) -> None:
         raise BackupError("BACKUP_INTERVAL_SECONDS должна быть не меньше 60.")
     if not cfg.recipient:
         raise BackupError("Не задан публичный ключ шифрования BACKUP_AGE_RECIPIENT.")
+    pyrage = load_encryption_module()
     try:
         pyrage.x25519.Recipient.from_str(cfg.recipient)
     except pyrage.RecipientError:
@@ -101,6 +111,7 @@ def file_md5(path: Path) -> str:
 
 def backup_once(cfg: BackupConfig) -> str:
     check_access(cfg)
+    pyrage = load_encryption_module()
     filename = f"tg_bot-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid4().hex[:12]}.sqlite.gz.age"
     remote_path = f"{cfg.remote}:{filename}"
     # Only transient files are kept locally, including when upload or verification fails.
@@ -156,6 +167,7 @@ def start_backup_task() -> asyncio.Task | None:
 
 
 def generate_key(path: Path) -> None:
+    pyrage = load_encryption_module()
     identity = pyrage.x25519.Identity.generate()
     # Never overwrite an existing private key or print it to logs.
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

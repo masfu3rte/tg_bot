@@ -60,6 +60,16 @@ python3 main.py
 
 В файле `.env` укажите реальный `BOT_TOKEN` и остальные значения, которые относятся к вашим чатам, каналам и контактным данным.
 
+После обновления кода установите зависимости тем же Python, который указан в `ExecStart` вашего сервиса.
+Например, если бот использует `/opt/tg_bot/venv/bin/python`:
+
+```bash
+cd /opt/tg_bot
+./venv/bin/python -m pip install -r requirements.txt
+sudo systemctl restart tg_bot.service
+sudo journalctl -u tg_bot.service -n 50 --no-pager
+```
+
 ## Получение file_id
 
 Вспомогательный скрипт также читает токен из `.env`:
