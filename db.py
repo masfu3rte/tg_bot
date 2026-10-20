@@ -19,6 +19,7 @@ class Database:
                 ("full_name", "TEXT"),
                 ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
                 ("offer_accepted", "INTEGER DEFAULT 0"),
+                ("offer_first_accepted_at", "TEXT"),
                 ("referral_code", "TEXT"),
                 ("referrer_id", "INTEGER"),
                 ("rating_sum", "INTEGER DEFAULT 0"),
@@ -349,12 +350,15 @@ class Database:
         cur = self.conn.cursor()
         cur.execute(
             """
-            INSERT INTO users (user_id, offer_accepted)
-            VALUES (?, ?)
+            INSERT INTO users (user_id, offer_accepted, offer_first_accepted_at)
+            VALUES (?, ?, CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE NULL END)
             ON CONFLICT(user_id) DO UPDATE SET
-                offer_accepted=excluded.offer_accepted
+                offer_accepted=excluded.offer_accepted,
+                offer_first_accepted_at=COALESCE(
+                    users.offer_first_accepted_at, excluded.offer_first_accepted_at
+                )
             """,
-            (user_id, int(accepted)),
+            (user_id, int(accepted), int(accepted)),
         )
         self.conn.commit()
 

@@ -242,7 +242,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             return
         parts = [p.strip() for p in (msg.text or "").splitlines() if p.strip()]
         if len(parts) != 3:
-            await msg.answer("Нужно три строки: ФИО, телефон, адрес ПВЗ.")
+            await msg.answer("Нужно три строки: ФИО, телефон, адрес ПВЗ СДЕК.")
             return
         fio, phone, pvz = parts
         await db.set_cdek_contacts(msg.from_user.id, fio, phone, pvz)

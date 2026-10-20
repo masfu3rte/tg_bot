@@ -423,7 +423,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
                 if not base_caption:
                     base_caption = await build_deal_moderation_intro(offer, req)
                 await cq.message.edit_caption(
-                    base_caption
+                    caption=base_caption
                     + "\n\n✅ Отклик одобрен, ожидаем решение покупателя.",
                     reply_markup=None,
                 )
@@ -515,7 +515,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             if cq.message.photo or cq.message.caption is not None:
                 base_caption = cq.message.caption or ""
                 await cq.message.edit_caption(
-                    base_caption + "\n\n✅ Вы приняли отклик.",
+                    caption=base_caption + "\n\n✅ Вы приняли отклик.",
                     reply_markup=None,
                 )
             else:
@@ -575,7 +575,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             if cq.message.photo or cq.message.caption is not None:
                 base_caption = cq.message.caption or ""
                 await cq.message.edit_caption(
-                    base_caption + "\n\n❌ Вы отклонили отклик.",
+                    caption=base_caption + "\n\n❌ Вы отклонили отклик.",
                     reply_markup=None,
                 )
             else:

@@ -426,10 +426,11 @@ class Keyboards:
         rows = []
         for idx, status in enumerate(statuses, start=1):
             prefix = "✅" if idx == current_index else "▫️"
+            label = "Товар у меня" if status == "Товар у продавца" else status
             rows.append(
                 [
                     InlineKeyboardButton(
-                        text=f"{prefix} {status}",
+                        text=f"{prefix} {label}",
                         callback_data=f"deal:status_pick:{offer_id}:{idx}",
                     )
                 ]
