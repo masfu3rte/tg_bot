@@ -50,6 +50,7 @@ class Config:
     MANAGER_CDEK_CONTACT_TEXT: str
 
     SUPPORT_USERNAME: str  # для «Оспорить»
+    REFERRALS_VISIBLE: bool = False
 
 
 def _required_env(name: str) -> str:
@@ -128,6 +129,7 @@ def load_config() -> Config:
         ),
 
         SUPPORT_USERNAME=_env("SUPPORT_USERNAME", "your_support_username"),
+        REFERRALS_VISIBLE=_env_int("REFERRALS_VISIBLE", 0) == 1,
     )
 
 

@@ -71,23 +71,25 @@ class Keyboards:
         )
 
     @staticmethod
-    def profile_menu_inline() -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="✏️ Контактные данные CDEK", callback_data="profile:cdek"
-                    )
-                ],
-                [InlineKeyboardButton(text="✏️ Банковские реквизиты", callback_data="profile:req")],
+    def profile_menu_inline(show_referrals: bool = False) -> InlineKeyboardMarkup:
+        rows = [
+            [
+                InlineKeyboardButton(
+                    text="✏️ Контактные данные CDEK", callback_data="profile:cdek"
+                )
+            ],
+            [InlineKeyboardButton(text="✏️ Банковские реквизиты", callback_data="profile:req")],
+        ]
+        if show_referrals:
+            rows.append(
                 [
                     InlineKeyboardButton(
                         text="🤝 Реферальная система",
                         callback_data="profile:referrals",
                     )
-                ],
-            ]
-        )
+                ]
+            )
+        return InlineKeyboardMarkup(inline_keyboard=rows)
 
     @staticmethod
     def referral_withdraw_kb() -> InlineKeyboardMarkup:

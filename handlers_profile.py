@@ -67,14 +67,17 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
                     from_chat_id=cfg.ASSETS_CHANNEL_ID,
                     message_id=cfg.PROFILE_BANNER_MESSAGE_ID,
                     caption=text,
-                    reply_markup=Keyboards.profile_menu_inline(),
+                    reply_markup=Keyboards.profile_menu_inline(show_referrals=cfg.REFERRALS_VISIBLE),
                 )
                 return
             except Exception:
                 pass
 
         # fallback: просто текст + кнопки
-        await bot.send_message(chat_id=chat_id, text=text, reply_markup=Keyboards.profile_menu_inline())
+        await bot.send_message(
+            chat_id=chat_id, text=text,
+            reply_markup=Keyboards.profile_menu_inline(show_referrals=cfg.REFERRALS_VISIBLE),
+        )
 
     async def send_profile(msg: Message):
         await send_profile_to(msg.from_user.id, msg.chat.id, msg.bot)
@@ -85,12 +88,18 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
 
     @router.message(F.text == "🤝 Реферальная система")
     async def my_referrals(msg: Message):
+        if not cfg.REFERRALS_VISIBLE:
+            await msg.answer("Раздел сейчас недоступен.", reply_markup=Keyboards.bottom_menu())
+            return
         user_id = msg.from_user.id
         text = await build_referral_text(user_id, msg.bot)
         await msg.answer(text, reply_markup=Keyboards.referral_withdraw_kb())
 
     @router.callback_query(F.data == "profile:referrals")
     async def my_referrals_inline(cq: CallbackQuery):
+        if not cfg.REFERRALS_VISIBLE:
+            await cq.answer("Раздел сейчас недоступен.")
+            return
         user_id = cq.from_user.id
         text = await build_referral_text(user_id, cq.bot)
         try:
@@ -102,6 +111,9 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
 
     @router.callback_query(F.data == "referral:withdraw")
     async def referral_withdraw(cq: CallbackQuery):
+        if not cfg.REFERRALS_VISIBLE:
+            await cq.answer("Раздел сейчас недоступен.")
+            return
         user_id = cq.from_user.id
         balance_cents = await db.get_referral_balance_cents(user_id)
         if balance_cents <= 0:
