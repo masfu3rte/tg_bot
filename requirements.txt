@@ -1,3 +1,4 @@
 aiogram>=3.0
 python-dotenv
 openpyxl>=3.1
+pyrage>=1.2,<2

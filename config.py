@@ -5,6 +5,22 @@ from typing import Optional
 from dotenv import load_dotenv
 
 
+BUYER_GUIDE_URL = "https://t.me/someout/445"
+SELLER_GUIDE_URL = "https://t.me/someout/446"
+BACKUP_DRIVE_FOLDER_ID = "1vr5mU4Ph3dIUHB0vvlmwjqPpnoID0HtJ"
+
+
+@dataclass(frozen=True)
+class BackupConfig:
+    enabled: bool
+    db_path: str
+    remote: str
+    recipient: str
+    interval_seconds: int
+    rclone_binary: str = "rclone"
+    folder_id: str = BACKUP_DRIVE_FOLDER_ID
+
+
 @dataclass
 class Config:
     BOT_TOKEN: str
@@ -77,13 +93,13 @@ def load_config() -> Config:
         BOT_TOKEN=_required_env("BOT_TOKEN"),
         DB_PATH=_env("DB_PATH", "bot.db"),
 
-        OFFER_URL=_env("OFFER_URL", "https://docs.google.com/document/d/19f2BYa5_jKiOyk_7ZrsSLME_aJMMKlgDeLisjI2fEvk/edit?usp=sharing"),
-        PRIVACY_POLICY_URL=_env("PRIVACY_POLICY_URL", "https://telegra.ph/POLITIKA-OBRABOTKI-PERSONALNYH-DANNYH-SOMEOUT-10-17"),
-        CHANNEL_URL=_env("CHANNEL_URL", "https://t.me/your_channel"),
+        OFFER_URL="https://docs.google.com/document/d/19f2BYa5_jKiOyk_7ZrsSLME_aJMMKlgDeLisjI2fEvk/edit?usp=sharing",
+        PRIVACY_POLICY_URL="https://telegra.ph/POLITIKA-OBRABOTKI-PERSONALNYH-DANNYH-SOMEOUT-10-17",
+        CHANNEL_URL="https://t.me/someout_orders",
 
-        SUPPORT_URL=_env("SUPPORT_URL", "https://t.me/your_support"),
-        REQUESTS_CHANNEL_URL=_env("REQUESTS_CHANNEL_URL", "https://t.me/your_requests_channel"),
-        ADS_URL=_env("ADS_URL", "https://t.me/your_ads_channel"),
+        SUPPORT_URL="https://t.me/your_support",
+        REQUESTS_CHANNEL_URL="https://t.me/your_requests_channel",
+        ADS_URL="https://t.me/your_ads_channel",
 
         # ворк-чат с модерацией
         MODERATION_CHAT_ID=_env_int("MODERATION_CHAT_ID"),
@@ -112,4 +128,19 @@ def load_config() -> Config:
         ),
 
         SUPPORT_USERNAME=_env("SUPPORT_USERNAME", "your_support_username"),
+    )
+
+
+def load_backup_config() -> BackupConfig:
+    load_dotenv()
+    enabled = _env_int("BACKUP_ENABLED", 0)
+    if enabled not in (0, 1):
+        raise RuntimeError("BACKUP_ENABLED должна быть 0 или 1.")
+    return BackupConfig(
+        enabled=bool(enabled),
+        db_path=_env("DB_PATH", "bot.db"),
+        remote=_env("BACKUP_RCLONE_REMOTE", "gdrive"),
+        recipient=_env("BACKUP_AGE_RECIPIENT"),
+        interval_seconds=_env_int("BACKUP_INTERVAL_SECONDS", 3600),
+        rclone_binary=_env("BACKUP_RCLONE_BINARY", "rclone"),
     )

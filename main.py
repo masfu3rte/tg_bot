@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
@@ -14,6 +15,7 @@ from handlers_offers_deals import setup_offers_deals_handlers
 from handlers_sliders import setup_sliders_handlers
 from handlers_reports import setup_reports_handlers
 from reports import start_reports_task
+from backups import start_backup_task
 
 
 async def main():
@@ -36,8 +38,15 @@ async def main():
     setup_reports_handlers(dp, db, cfg)
 
     start_reports_task(bot, db, cfg)
+    backup_task = start_backup_task()
 
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        if backup_task is not None:
+            backup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await backup_task
 
 
 if __name__ == "__main__":
