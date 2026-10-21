@@ -5,6 +5,9 @@ https://drive.google.com/drive/folders/1vr5mU4Ph3dIUHB0vvlmwjqPpnoID0HtJ
 
 Её ID закреплён в `config.py` (`BACKUP_DRIVE_FOLDER_ID`). Ссылки в `.env` не нужны.
 Скрипт отправляет только зашифрованные файлы БД `.sqlite.gz.age`, а не `.env`, токены или ключи.
+После обновления проекта установите зависимости через `python -m pip install -r requirements.txt`
+тем Python, который запускает бота. При выключенных копиях `pyrage` не загружается;
+при включённых копиях его отсутствие отключает резервирование с понятной ошибкой в журнале, не останавливая бота.
 
 ## Авторизация Google Drive
 
