@@ -82,6 +82,11 @@ sudo systemctl restart tg_bot.service
 sudo journalctl -u tg_bot.service -n 50 --no-pager
 ```
 
+Для переноса актуальных реквизитов менеджера из `.env.example` в существующий `.env` выполните
+`./venv/bin/python update_manager_requisites.py` перед перезапуском сервиса.
+Команда меняет только `MANAGER_REQUISITES_TEXT`, сохраняя токен и остальные настройки.
+Путь к другому файлу можно задать через `--env-file /путь/к/.env`.
+
 ## Получение file_id
 
 Вспомогательный скрипт также читает токен из `.env`:
