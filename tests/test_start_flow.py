@@ -124,20 +124,22 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await self.db.is_offer_accepted(101))
         self.callback_msg.answer.assert_not_awaited()
 
-    async def test_info_shows_documents_channel_and_guides_for_returning_user(self):
+    async def test_info_shows_only_documents_and_channel_without_welcome_or_banner(self):
         await self.db.add_user(101, "seller", "Seller")
         await self.db.set_offer_accepted(101, True)
+        self.cfg.ASSETS_CHANNEL_ID = -100123
+        self.cfg.START_BANNER_ID = 7
         await self.info(self.msg)
-        self.assertEqual(self.msg.answer.await_count, 2)
-        documents, welcome = self.msg.answer.await_args_list
+        self.msg.answer.assert_awaited_once()
+        self.msg.bot.copy_message.assert_not_awaited()
+        documents = self.msg.answer.await_args
         buttons = [button for row in documents.kwargs["reply_markup"].inline_keyboard for button in row]
         self.assertEqual([button.url for button in buttons], [
             "https://example.com/offer", "https://example.com/privacy", "https://t.me/someout",
         ])
         self.assertFalse(any(button.callback_data == "offer:accept" for button in buttons))
-        self.assertEqual(welcome.args[0], WELCOME_TEXT)
-        self.assertIn("https://t.me/someout/445", welcome.args[0])
-        self.assertIn("https://t.me/someout/446", welcome.args[0])
+        self.assertNotIn("Приветствуем", documents.args[0])
+        self.assertNotIn("Гайд", documents.args[0])
         self.assertNotIn("Техподдержка", str(documents.kwargs["reply_markup"]))
 
     async def test_info_before_acceptance_shows_documents_then_welcome_after_click(self):
