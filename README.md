@@ -86,6 +86,9 @@ sudo journalctl -u tg_bot.service -n 50 --no-pager
 `./venv/bin/python update_manager_requisites.py` перед перезапуском сервиса.
 Команда меняет только `MANAGER_REQUISITES_TEXT`, сохраняя токен и остальные настройки.
 Путь к другому файлу можно задать через `--env-file /путь/к/.env`.
+Для обновления только ФИО, телефона, адреса CDEK и предупреждения об оплате доставки используйте
+`./venv/bin/python update_manager_requisites.py --cdek-only` и затем перезапустите сервис.
+Эта опция меняет только `MANAGER_CDEK_CONTACT_TEXT`.
 
 ## Получение file_id
 
