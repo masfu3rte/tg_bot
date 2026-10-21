@@ -22,15 +22,16 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
             START_BANNER_ID=None,
             OFFER_URL="https://example.com/offer",
             PRIVACY_POLICY_URL="https://example.com/privacy",
-            CHANNEL_URL="https://t.me/example",
+            CHANNEL_URL="https://t.me/someout",
         )
         router = Router()
         setup_start_help_handlers(router, self.db, cfg)
         self.start = next(h.callback for h in router.message.handlers if h.callback.__name__ == "cmd_start")
+        self.info = next(h.callback for h in router.message.handlers if h.callback.__name__ == "info_cmd")
         self.accept = router.callback_query.handlers[0].callback
         self.user = SimpleNamespace(id=101, username="seller", full_name="Seller")
         self.msg = SimpleNamespace(
-            from_user=self.user, text="/start", answer=AsyncMock(),
+            from_user=self.user, text="/start", answer=AsyncMock(), answer_photo=AsyncMock(),
         )
         # A callback message is authored by the bot, not by the person clicking.
         self.callback_msg = SimpleNamespace(
@@ -66,12 +67,77 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("request_id", await self.state.get_data())
         self.callback_msg.answer.assert_not_awaited()
 
-    async def test_previous_acceptance_does_not_bypass_documents(self):
+    async def test_returning_user_opens_orders_link_without_repeating_documents(self):
         await self.db.add_user(101, "seller", "Seller")
         await self.db.set_offer_accepted(101, True)
         await self.open_request()
+        text = self.msg.answer.await_args.args[0]
+        self.assertIn(f"заявку №{self.request_id}", text)
+        self.assertNotIn("Перед началом использования сервиса", text)
+        self.assertEqual(await self.state.get_state(), OfferCreate.waiting_for_price.state)
+        self.assertEqual((await self.state.get_data())["request_id"], self.request_id)
+        self.assertNotIn("pending_request_payload", await self.state.get_data())
+
+    async def test_returning_user_start_shows_only_main_menu(self):
+        await self.start(self.msg, self.state)
         self.assert_terms_shown()
-        self.assertIsNone(await self.state.get_state())
+        await self.accept(self.cq, self.state)
+        self.msg.answer.reset_mock()
+        for _ in range(2):
+            await self.start(self.msg, self.state)
+        self.assertEqual(self.msg.answer.await_count, 2)
+        for call in self.msg.answer.await_args_list:
+            self.assertEqual(call.args[0], "Главное меню:")
+            self.assertTrue(call.kwargs["reply_markup"].keyboard)
+
+    async def test_start_repeats_documents_until_user_actually_accepts(self):
+        await self.start(self.msg, self.state)
+        await self.start(self.msg, self.state)
+        self.assert_terms_shown()
+        self.assertFalse(await self.db.is_offer_accepted(101))
+        self.callback_msg.answer.assert_not_awaited()
+
+    async def test_info_shows_documents_channel_and_guides_for_returning_user(self):
+        await self.db.add_user(101, "seller", "Seller")
+        await self.db.set_offer_accepted(101, True)
+        await self.info(self.msg)
+        self.assertEqual(self.msg.answer.await_count, 2)
+        documents, welcome = self.msg.answer.await_args_list
+        buttons = [button for row in documents.kwargs["reply_markup"].inline_keyboard for button in row]
+        self.assertEqual([button.url for button in buttons], [
+            "https://example.com/offer", "https://example.com/privacy", "https://t.me/someout",
+        ])
+        self.assertFalse(any(button.callback_data == "offer:accept" for button in buttons))
+        self.assertEqual(welcome.args[0], WELCOME_TEXT)
+        self.assertIn("https://t.me/someout/445", welcome.args[0])
+        self.assertIn("https://t.me/someout/446", welcome.args[0])
+        self.assertNotIn("Техподдержка", str(documents.kwargs["reply_markup"]))
+
+    async def test_info_before_acceptance_shows_documents_then_welcome_after_click(self):
+        await self.info(self.msg)
+        self.msg.answer.assert_awaited_once()
+        self.assert_terms_shown()
+        self.assertFalse(await self.db.is_offer_accepted(101))
+        await self.accept(self.cq, self.state)
+        self.assertTrue(await self.db.is_offer_accepted(101))
+        self.assertEqual(self.callback_msg.answer.await_args.args[0], WELCOME_TEXT)
+
+    async def test_info_preserves_pending_request_until_acceptance(self):
+        await self.open_request()
+        await self.info(self.msg)
+        self.assertEqual((await self.state.get_data())["pending_request_payload"], f"req_{self.request_id}")
+        await self.accept(self.cq, self.state)
+        self.assertEqual(await self.state.get_state(), OfferCreate.waiting_for_price.state)
+        self.assertEqual((await self.state.get_data())["request_id"], self.request_id)
+
+    async def test_info_does_not_interrupt_active_offer(self):
+        await self.db.add_user(101, "seller", "Seller")
+        await self.db.set_offer_accepted(101, True)
+        await self.state.set_state(OfferCreate.waiting_for_days)
+        await self.state.set_data({"request_id": self.request_id, "price": 1000})
+        await self.info(self.msg)
+        self.assertEqual(await self.state.get_state(), OfferCreate.waiting_for_days.state)
+        self.assertEqual(await self.state.get_data(), {"request_id": self.request_id, "price": 1000})
 
     async def test_accept_button_records_time_for_legacy_user(self):
         await self.start(self.msg, self.state)
@@ -113,10 +179,20 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.db.set_request_status(self.request_id, "deleted")
         for payload in ("req_invalid", "req_999999", f"req_{self.request_id}"):
             with self.subTest(payload=payload):
+                await self.db.set_offer_accepted(101, False)
                 await self.open_request(payload)
                 self.assert_terms_shown()
                 await self.accept(self.cq, self.state)
                 self.assertIn("Заявка не найдена", self.callback_msg.answer.await_args.args[0])
+                self.assertIsNone(await self.state.get_state())
+
+    async def test_returning_user_gets_invalid_request_error_without_documents(self):
+        await self.db.add_user(101, "seller", "Seller")
+        await self.db.set_offer_accepted(101, True)
+        for payload in ("req_invalid", "req_999999"):
+            with self.subTest(payload=payload):
+                await self.open_request(payload)
+                self.assertIn("Заявка не найдена", self.msg.answer.await_args.args[0])
                 self.assertIsNone(await self.state.get_state())
 
     async def test_incomplete_profile_cannot_start_offer_after_acceptance(self):

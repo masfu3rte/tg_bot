@@ -96,7 +96,7 @@ def load_config() -> Config:
 
         OFFER_URL="https://docs.google.com/document/d/19f2BYa5_jKiOyk_7ZrsSLME_aJMMKlgDeLisjI2fEvk/edit?usp=sharing",
         PRIVACY_POLICY_URL="https://telegra.ph/POLITIKA-OBRABOTKI-PERSONALNYH-DANNYH-SOMEOUT-10-17",
-        CHANNEL_URL="https://t.me/someout_orders",
+        CHANNEL_URL="https://t.me/someout",
 
         SUPPORT_URL="https://t.me/your_support",
         REQUESTS_CHANNEL_URL="https://t.me/your_requests_channel",

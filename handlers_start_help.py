@@ -18,6 +18,18 @@ WELCOME_TEXT = (
 
 
 def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
+    async def send_documents(msg: Message, show_accept: bool = True):
+        await msg.answer(
+            "Перед началом использования сервиса просьба "
+            "ознакомиться с нашей публичной офертой и политикой обработки данных.",
+            reply_markup=Keyboards.start_menu(
+                offer_url=cfg.OFFER_URL,
+                privacy_policy_url=cfg.PRIVACY_POLICY_URL,
+                channel_url=cfg.CHANNEL_URL,
+                show_accept=show_accept,
+            ),
+        )
+
     async def send_welcome_message(msg: Message):
         if cfg.ASSETS_CHANNEL_ID and cfg.START_BANNER_ID:
             try:
@@ -92,8 +104,6 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
         await db.ensure_referral_code(user.id)
 
         await state.clear()
-        if payload and payload.startswith("req_"):
-            await state.update_data(pending_request_payload=payload)
 
         if payload and payload.startswith("ref_") and is_new_user:
             ref_code = payload.split("_", 1)[1]
@@ -103,20 +113,24 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
                 if existing_referrer is None:
                     await db.set_referrer(user.id, referrer_id)
 
-        # /start, в том числе по ссылке из канала, всегда показывает условия
-        caption = (
-            "Перед началом использования сервиса просьба "
-            "ознакомиться с нашей публичной офертой и политикой обработки данных."
-        )
-        await msg.answer(
-            caption,
-            reply_markup=Keyboards.start_menu(
-                offer_url=cfg.OFFER_URL,
-                privacy_policy_url=cfg.PRIVACY_POLICY_URL,
-                channel_url=cfg.CHANNEL_URL,
-            ),
-        )
-        return
+        if not await db.is_offer_accepted(user.id):
+            if payload and payload.startswith("req_"):
+                await state.update_data(pending_request_payload=payload)
+            await send_documents(msg)
+            return
+
+        if payload and payload.startswith("req_"):
+            await start_request_offer(msg, user.id, payload, state)
+            return
+
+        await msg.answer("Главное меню:", reply_markup=Keyboards.bottom_menu())
+
+    @router.message(Command("info"))
+    async def info_cmd(msg: Message):
+        accepted = await db.is_offer_accepted(msg.from_user.id)
+        await send_documents(msg, show_accept=not accepted)
+        if accepted:
+            await send_welcome_message(msg)
 
     @router.callback_query(F.data == "offer:accept")
     async def accept_offer(cq: CallbackQuery, state: FSMContext):
