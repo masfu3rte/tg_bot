@@ -24,6 +24,7 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
             PRIVACY_POLICY_URL="https://example.com/privacy",
             CHANNEL_URL="https://t.me/someout",
         )
+        self.cfg = cfg
         router = Router()
         setup_start_help_handlers(router, self.db, cfg)
         self.start = next(h.callback for h in router.message.handlers if h.callback.__name__ == "cmd_start")
@@ -32,6 +33,7 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
         self.user = SimpleNamespace(id=101, username="seller", full_name="Seller")
         self.msg = SimpleNamespace(
             from_user=self.user, text="/start", answer=AsyncMock(), answer_photo=AsyncMock(),
+            chat=SimpleNamespace(id=101), bot=AsyncMock(),
         )
         # A callback message is authored by the bot, not by the person clicking.
         self.callback_msg = SimpleNamespace(
@@ -78,7 +80,7 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.state.get_data())["request_id"], self.request_id)
         self.assertNotIn("pending_request_payload", await self.state.get_data())
 
-    async def test_returning_user_start_shows_only_main_menu(self):
+    async def test_returning_user_start_shows_welcome_and_menu_without_documents(self):
         await self.start(self.msg, self.state)
         self.assert_terms_shown()
         await self.accept(self.cq, self.state)
@@ -87,8 +89,33 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
             await self.start(self.msg, self.state)
         self.assertEqual(self.msg.answer.await_count, 2)
         for call in self.msg.answer.await_args_list:
-            self.assertEqual(call.args[0], "Главное меню:")
+            self.assertEqual(call.args[0], WELCOME_TEXT)
+            self.assertIn("https://t.me/someout/445", call.args[0])
+            self.assertIn("https://t.me/someout/446", call.args[0])
             self.assertTrue(call.kwargs["reply_markup"].keyboard)
+
+    async def test_returning_user_start_sends_configured_banner_with_welcome(self):
+        await self.db.add_user(101, "seller", "Seller")
+        await self.db.set_offer_accepted(101, True)
+        self.cfg.ASSETS_CHANNEL_ID = -100123
+        self.cfg.START_BANNER_ID = 7
+        await self.start(self.msg, self.state)
+        self.msg.bot.copy_message.assert_awaited_once()
+        sent = self.msg.bot.copy_message.await_args.kwargs
+        self.assertEqual((sent["chat_id"], sent["from_chat_id"], sent["message_id"]), (101, -100123, 7))
+        self.assertEqual(sent["caption"], WELCOME_TEXT)
+        self.assertTrue(sent["reply_markup"].keyboard)
+        self.msg.answer.assert_not_awaited()
+
+    async def test_unavailable_banner_still_sends_welcome_and_menu(self):
+        await self.db.add_user(101, "seller", "Seller")
+        await self.db.set_offer_accepted(101, True)
+        self.cfg.ASSETS_CHANNEL_ID = -100123
+        self.cfg.START_BANNER_ID = 7
+        self.msg.bot.copy_message.side_effect = RuntimeError("banner unavailable")
+        await self.start(self.msg, self.state)
+        self.assertEqual(self.msg.answer.await_args.args[0], WELCOME_TEXT)
+        self.assertTrue(self.msg.answer.await_args.kwargs["reply_markup"].keyboard)
 
     async def test_start_repeats_documents_until_user_actually_accepts(self):
         await self.start(self.msg, self.state)

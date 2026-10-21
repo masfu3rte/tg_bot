@@ -123,7 +123,7 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
             await start_request_offer(msg, user.id, payload, state)
             return
 
-        await msg.answer("Главное меню:", reply_markup=Keyboards.bottom_menu())
+        await send_welcome_message(msg)
 
     @router.message(Command("info"))
     async def info_cmd(msg: Message):
