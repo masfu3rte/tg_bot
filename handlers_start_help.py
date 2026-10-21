@@ -129,8 +129,6 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
     async def info_cmd(msg: Message):
         accepted = await db.is_offer_accepted(msg.from_user.id)
         await send_documents(msg, show_accept=not accepted)
-        if accepted:
-            await send_welcome_message(msg)
 
     @router.callback_query(F.data == "offer:accept")
     async def accept_offer(cq: CallbackQuery, state: FSMContext):
