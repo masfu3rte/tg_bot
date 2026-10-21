@@ -801,8 +801,8 @@ class Database:
             SELECT *
               FROM offers
              WHERE request_id=?
-               AND status='approved'
-             ORDER BY id DESC
+               AND status IN ('approved', 'buyer_accepted')
+             ORDER BY CASE WHEN status='buyer_accepted' THEN 0 ELSE 1 END, id DESC
              LIMIT 1
             """,
             (request_id,),

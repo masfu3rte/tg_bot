@@ -755,6 +755,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         if side != "final" and (
             offer["buyer_deposit_status"] == "confirmed"
             and offer["seller_deposit_status"] == "confirmed"
+            and not offer["deal_status"]
         ):
             await db.set_deal_status(offer_id, 1)
             req_after = await db.get_request(offer["request_id"])

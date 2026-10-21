@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
@@ -11,6 +12,23 @@ from states import DealTrack
 from utils import build_request_link, build_direct_link
 
 from handlers_offers_deals import DEAL_STATUS_STEPS
+
+
+logger = logging.getLogger(__name__)
+TRACK_STATUS_LABELS = {
+    "none": "Не указан",
+    "pending": "На проверке",
+    "approved": "Подтвержден",
+    "rejected": "Отклонен",
+}
+
+
+def deal_status_index(value: int | None) -> int:
+    return max(1, min(len(DEAL_STATUS_STEPS), value or 1))
+
+
+def deal_status_name(value: int | None) -> str:
+    return DEAL_STATUS_STEPS[deal_status_index(value) - 1]
 
 
 def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
@@ -54,8 +72,7 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             base_price = deal["price_cents"] / 100.0
             buyer_total = base_price * 1.13
             buyer_deposit = base_price * 0.2825
-            status_idx = max(0, min(len(DEAL_STATUS_STEPS) - 1, deal["deal_status"]))
-            status_name = DEAL_STATUS_STEPS[status_idx]
+            status_name = deal_status_name(deal["deal_status"])
             if deal.get("final_payment_status") == "confirmed":
                 remaining = 0
             elif deal.get("buyer_deposit_status") == "confirmed":
@@ -225,7 +242,7 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
 
     # ===== Слайдер «Активные отклики» =====
 
-    async def send_offer_card(msg_obj, user_id: int, offer: dict):
+    async def build_offer_card(user_id: int, offer: dict):
         index, total = await db.get_offer_index_and_total(user_id, offer["id"])
         req = await db.get_request(offer["request_id"]) or {}
         link = build_request_link(cfg, req) or ""
@@ -250,14 +267,18 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             f"Срок доставки: (до {due_date})" if due_date else "Срок доставки: (до мм.дд.гггг)",
             f"Состояние: {offer['condition']}/10",
             "",
-            "Статус сделки: Внесены залоги «Изначально»",
+            f"Статус сделки: {deal_status_name(offer['deal_status'])}",
         ]
         if offer.get("track_number"):
-            text_lines.append(f"Трек-номер: {offer['track_number']} ({offer['track_status']})")
+            track_status = TRACK_STATUS_LABELS.get(offer.get("track_status"), "Неизвестен")
+            text_lines.append(f"Трек-номер: {offer['track_number']} ({track_status})")
 
         text = "\n".join(text_lines)
         kb = Keyboards.user_offers_slider_kb(offer["id"], index, total)
+        return text, kb
 
+    async def send_offer_card(msg_obj, user_id: int, offer: dict):
+        text, kb = await build_offer_card(user_id, offer)
         if offer.get("photo_file_id"):
             await msg_obj.answer_photo(photo=offer["photo_file_id"], caption=text, reply_markup=kb)
         else:
@@ -327,6 +348,29 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
 
     # ===== изменение статуса (меню) =====
 
+    async def refresh_status_card(cq: CallbackQuery, state: FSMContext, offer: dict) -> bool:
+        source = (await state.get_data()).get("deal_status_card")
+        if not source or source["offer_id"] != offer["id"]:
+            return False
+        text, kb = await build_offer_card(offer["buyer_id"], offer)
+        try:
+            if source["is_photo"]:
+                await cq.bot.edit_message_caption(
+                    chat_id=source["chat_id"], message_id=source["message_id"],
+                    caption=text, reply_markup=kb,
+                )
+            else:
+                await cq.bot.edit_message_text(
+                    chat_id=source["chat_id"], message_id=source["message_id"],
+                    text=text, reply_markup=kb,
+                )
+        except Exception as exc:
+            if "message is not modified" in str(exc).lower():
+                return True
+            logger.warning("Не удалось обновить карточку сделки %s: %s", offer["id"], type(exc).__name__)
+            return False
+        return True
+
     @router.callback_query(F.data.startswith("deal:status_menu:"))
     async def deal_status_menu(cq: CallbackQuery, state: FSMContext):
         offer_id = int(cq.data.split(":")[-1])
@@ -337,7 +381,13 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
         if offer["buyer_id"] != cq.from_user.id:
             await cq.answer("Менять статус может только продавец.", show_alert=True)
             return
-        idx = max(1, offer["deal_status"] or 1)
+        idx = deal_status_index(offer["deal_status"])
+        await state.update_data(deal_status_card={
+            "offer_id": offer_id,
+            "chat_id": cq.message.chat.id,
+            "message_id": cq.message.message_id,
+            "is_photo": bool(cq.message.photo),
+        })
         req = await db.get_request(offer["request_id"]) or {}
         link = build_request_link(cfg, req) or f"Сделка №{offer['request_id']}"
 
@@ -356,9 +406,16 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
 
     @router.callback_query(F.data.startswith("deal:status_pick:"))
     async def deal_status_set(cq: CallbackQuery, state: FSMContext):
-        _, _, offer_s, idx_s = cq.data.split(":")
-        offer_id = int(offer_s)
-        idx = int(idx_s)
+        try:
+            _, _, offer_s, idx_s = cq.data.split(":")
+            offer_id = int(offer_s)
+            idx = int(idx_s)
+        except (ValueError, TypeError):
+            await cq.answer("Неверный статус сделки.", show_alert=True)
+            return
+        if not 1 <= idx <= len(DEAL_STATUS_STEPS):
+            await cq.answer("Неверный статус сделки.", show_alert=True)
+            return
         offer = await db.get_offer(offer_id)
         if not offer:
             await cq.answer("Сделка не найдена.", show_alert=True)
@@ -368,7 +425,7 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             return
 
         await db.set_deal_status(offer_id, idx)
-        status_name = DEAL_STATUS_STEPS[idx - 1]
+        status_name = deal_status_name(idx)
 
         seller_id = offer["buyer_id"]
         req = await db.get_request(offer["request_id"]) or {}
@@ -398,11 +455,14 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             except Exception:
                 pass
 
-            await cq.bot.send_message(
-                chat_id=cfg.MODERATION_CHAT_ID,
-                message_thread_id=cfg.MODERATION_TOPIC_ID,
-                text=f"Продавец поставил статус «Товар в пути до менеджера» по сделке №{offer['request_id']}.",
-            )
+            try:
+                await cq.bot.send_message(
+                    chat_id=cfg.MODERATION_CHAT_ID,
+                    message_thread_id=cfg.MODERATION_TOPIC_ID,
+                    text=f"Продавец поставил статус «Товар в пути до менеджера» по сделке №{offer['request_id']}.",
+                )
+            except Exception as exc:
+                logger.warning("Не удалось уведомить модерацию о статусе сделки %s: %s", offer_id, type(exc).__name__)
             moderation_thread_id = await ensure_moderation_thread_id(offer_id, cq.bot)
             if moderation_thread_id and moderation_thread_id != cfg.MODERATION_TOPIC_ID:
                 try:
@@ -426,6 +486,10 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             except Exception:
                 pass
 
+        updated_offer = await db.get_offer(offer_id)
+        if not await refresh_status_card(cq, state, updated_offer):
+            await send_offer_card(cq.message, seller_id, updated_offer)
+
         try:
             await cq.message.edit_text(
                 f"Статус сделки №{offer['request_id']}.\n"
@@ -438,3 +502,21 @@ def setup_sliders_handlers(router: Router, db: Database, cfg: Config):
             pass
 
         await cq.answer("Статус обновлён.")
+
+    @router.callback_query(F.data.startswith("deal:status_back:"))
+    async def deal_status_back(cq: CallbackQuery, state: FSMContext):
+        offer_id = int(cq.data.split(":")[-1])
+        offer = await db.get_offer(offer_id)
+        if not offer or offer["buyer_id"] != cq.from_user.id:
+            await cq.answer("Сделка не найдена или недоступна.", show_alert=True)
+            return
+        if not await refresh_status_card(cq, state, offer):
+            await send_offer_card(cq.message, cq.from_user.id, offer)
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+        data = await state.get_data()
+        data.pop("deal_status_card", None)
+        await state.set_data(data)
+        await cq.answer()
