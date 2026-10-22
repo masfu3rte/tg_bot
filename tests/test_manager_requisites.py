@@ -32,6 +32,24 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("обратитесь к @someoutmanager", text)
         self.assertNotIn("&#x", text)
         self.assertNotIn("Есть есть", text)
+        self.assertIn("Номер счета: 40802810320001147062\nБИК: 044525104\n‼️", text)
+        self.assertNotIn("/n", text)
+        self.assertNotIn(r"\n", text)
+
+    def test_existing_env_manager_details_accept_legacy_line_breaks(self):
+        expected = "Заголовок:\nСчет: 123\nБИК: 456\n‼️Внимание‼️"
+        for separator in ("\n\n", "\r\n\r\n", r"\n\n", r"\r\n", "/n/n"):
+            with self.subTest(separator=repr(separator)), patch.dict(
+                os.environ,
+                {
+                    "BOT_TOKEN": "123456789:offline_config_check_only",
+                    "MANAGER_REQUISITES_TEXT": separator.join(expected.splitlines()),
+                    "MANAGER_CDEK_CONTACT_TEXT": separator.join(expected.splitlines()),
+                },
+            ), patch("config.load_environment"):
+                cfg = load_config()
+                self.assertEqual(cfg.MANAGER_REQUISITES_TEXT, expected)
+                self.assertEqual(cfg.MANAGER_CDEK_CONTACT_TEXT, expected)
 
     def test_update_preserves_existing_settings_and_is_repeatable(self):
         self.env_file.write_text(
@@ -63,6 +81,9 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("3. Москва, ул. Черняховского, 5 корп. 2", text)
         self.assertIn("Вам нужно самостоятельно оплатить доставку товара.", text)
         self.assertIn("В ином случае он будет отправлен обратно.", text)
+        self.assertNotIn("\n\n", text)
+        self.assertNotIn("/n", text)
+        self.assertNotIn(r"\n", text)
 
     def test_cdek_update_preserves_bank_details_and_other_settings(self):
         self.env_file.write_text(
@@ -81,7 +102,9 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_seller_receives_new_cdek_contacts_when_goods_are_with_seller(self):
         update_manager_requisites(self.env_file, cdek_only=True)
-        value = dotenv_values(self.env_file)["MANAGER_CDEK_CONTACT_TEXT"]
+        value = dotenv_values(self.env_file)["MANAGER_CDEK_CONTACT_TEXT"].replace(
+            "\n", "\r\n\r\n"
+        )
         with patch.dict(
             os.environ,
             {
@@ -132,7 +155,9 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_buyer_seller_and_final_payment_messages_use_new_details(self):
         update_manager_requisites(self.env_file)
-        value = dotenv_values(self.env_file)["MANAGER_REQUISITES_TEXT"]
+        value = dotenv_values(self.env_file)["MANAGER_REQUISITES_TEXT"].replace(
+            "\n", "/n/n"
+        )
         with patch.dict(
             os.environ,
             {

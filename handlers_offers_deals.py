@@ -229,7 +229,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             "Реквизиты менеджера для оплаты залога:",
             "<b>Реквизиты менеджера для оплаты залога:</b>",
             1,
-        ).replace(":\n", ":\n\n", 1)
+        )
         buyer_text = (
             "✅ <b>Вы подтвердили отклик, можно переходить к оплате залогов.</b>\n\n"
             f"{deal_text}\n\n"
@@ -240,7 +240,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
             "После оплаты нажмите кнопку «Оплатил»."
         )
 
-        seller_requisites_text = cfg.MANAGER_REQUISITES_TEXT.replace(":\n", ":\n\n", 1)
+        seller_requisites_text = cfg.MANAGER_REQUISITES_TEXT
         seller_text = (
             "✅ Покупатель принял ваш отклик, можно переходить к оплате залога.\n\n"
             f"{deal_text}\n\n"
@@ -380,6 +380,7 @@ def setup_offers_deals_handlers(router: Router, db: Database, cfg: Config):
         jobs = content(
             req["user_id"],
             buyer_text,
+            photo=offer.get("photo_file_id"),
             reply_markup=Keyboards.offer_buyer_decision_kb(offer_id),
         )
         jobs += content(

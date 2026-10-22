@@ -169,8 +169,8 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
             reply_markup=Keyboards.help_menu(
                 support_url=cfg.SUPPORT_URL,
                 channel_url=cfg.CHANNEL_URL,
-                requests_channel_url=cfg.REQUESTS_CHANNEL_URL,
-                ads_url=cfg.ADS_URL,
+                offer_url=cfg.OFFER_URL,
+                privacy_policy_url=cfg.PRIVACY_POLICY_URL,
             ),
         )
 

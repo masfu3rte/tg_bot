@@ -7,8 +7,8 @@ from dotenv.parser import parse_stream
 from pathlib import Path
 from urllib.parse import urlparse
 
-BUYER_GUIDE_URL = "https://t.me/someout/445"
-SELLER_GUIDE_URL = "https://t.me/someout/446"
+BUYER_GUIDE_URL = "https://t.me/someout/446"
+SELLER_GUIDE_URL = "https://t.me/someout/445"
 BACKUP_DRIVE_FOLDER_ID = "1vr5mU4Ph3dIUHB0vvlmwjqPpnoID0HtJ"
 
 
@@ -142,6 +142,13 @@ def _env_optional_int(name: str) -> Optional[int]:
         ) from exc
 
 
+def _manager_text(name: str, default: str) -> str:
+    """Read manager details, accepting legacy escaped and mistyped newlines."""
+    text = _env(name, default)
+    text = text.replace(r"\r\n", "\n").replace(r"\n", "\n").replace("/n", "\n")
+    return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+
+
 def load_config() -> Config:
     load_environment()
 
@@ -172,11 +179,11 @@ def load_config() -> Config:
         ),
         MY_OFFERS_BANNER_MESSAGE_ID=_env_optional_int("MY_OFFERS_BANNER_MESSAGE_ID"),
         START_BANNER_ID=_env_optional_int("START_BANNER_ID"),
-        MANAGER_REQUISITES_TEXT=_env(
+        MANAGER_REQUISITES_TEXT=_manager_text(
             "MANAGER_REQUISITES_TEXT",
             "Реквизиты менеджера для оплаты залога укажите в .env",
         ),
-        MANAGER_CDEK_CONTACT_TEXT=_env(
+        MANAGER_CDEK_CONTACT_TEXT=_manager_text(
             "MANAGER_CDEK_CONTACT_TEXT",
             "Контактные данные менеджера для CDEK укажите в .env",
         ),
