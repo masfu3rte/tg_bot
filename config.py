@@ -146,7 +146,10 @@ def _manager_text(name: str, default: str) -> str:
     """Read manager details, accepting legacy escaped and mistyped newlines."""
     text = _env(name, default)
     text = text.replace(r"\r\n", "\n").replace(r"\n", "\n").replace("/n", "\n")
-    return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+    text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+    if name == "MANAGER_REQUISITES_TEXT":
+        text = text.replace("\n‼️", "\n\n‼️")
+    return text
 
 
 def load_config() -> Config:

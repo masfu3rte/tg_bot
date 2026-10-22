@@ -32,7 +32,8 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("обратитесь к @someoutmanager", text)
         self.assertNotIn("&#x", text)
         self.assertNotIn("Есть есть", text)
-        self.assertIn("Номер счета: 40802810320001147062\nБИК: 044525104\n‼️", text)
+        self.assertIn("Номер счета: 40802810320001147062\nБИК: 044525104\n\n‼️", text)
+        self.assertNotIn("\n\n\n‼️", text)
         self.assertNotIn("/n", text)
         self.assertNotIn(r"\n", text)
 
@@ -48,7 +49,10 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
                 },
             ), patch("config.load_environment"):
                 cfg = load_config()
-                self.assertEqual(cfg.MANAGER_REQUISITES_TEXT, expected)
+                self.assertEqual(
+                    cfg.MANAGER_REQUISITES_TEXT,
+                    expected.replace("\n‼️", "\n\n‼️"),
+                )
                 self.assertEqual(cfg.MANAGER_CDEK_CONTACT_TEXT, expected)
 
     def test_update_preserves_existing_settings_and_is_repeatable(self):
