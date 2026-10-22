@@ -55,7 +55,9 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
         self.assert_payment_details(values["MANAGER_REQUISITES_TEXT"])
 
     def assert_cdek_contacts(self, text):
-        self.assertIn("Контактные данные для отправки товара менеджеру через CDEK:", text)
+        self.assertIn(
+            "Контактные данные для отправки товара менеджеру через CDEK:", text
+        )
         self.assertIn("1. Широков Владислав Дмитриевич", text)
         self.assertIn("2. 79998623067", text)
         self.assertIn("3. Москва, ул. Черняховского, 5 корп. 2", text)
@@ -80,10 +82,14 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
     async def test_seller_receives_new_cdek_contacts_when_goods_are_with_seller(self):
         update_manager_requisites(self.env_file, cdek_only=True)
         value = dotenv_values(self.env_file)["MANAGER_CDEK_CONTACT_TEXT"]
-        with patch.dict(os.environ, {
-            "BOT_TOKEN": "123456789:offline_cdek_check_only",
-            "DB_PATH": ":memory:", "MANAGER_CDEK_CONTACT_TEXT": value,
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "123456789:offline_cdek_check_only",
+                "DB_PATH": ":memory:",
+                "MANAGER_CDEK_CONTACT_TEXT": value,
+            },
+        ):
             cfg = load_config()
         db = Database(":memory:")
         storage = MemoryStorage()
@@ -92,17 +98,32 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
             await db.add_user(101, "buyer", "Buyer")
             await db.add_user(202, "seller", "Seller")
             request_id = await db.create_request(101, "Order", "Item", "Details", None)
+            await db.set_request_status(request_id, "approved")
             offer_id = await db.create_offer(request_id, 202, 100000, 3, 5, "photo")
             await db.set_offer_status(offer_id, "buyer_accepted")
+            await db.set_buyer_deposit_status(offer_id, "confirmed")
+            await db.set_seller_deposit_status(offer_id, "confirmed")
             router = Router()
             setup_sliders_handlers(router, db, cfg)
-            handler = next(h.callback for h in router.callback_query.handlers if h.callback.__name__ == "deal_status_set")
-            cq = SimpleNamespace(
-                data=f"deal:status_pick:{offer_id}:5", from_user=SimpleNamespace(id=202),
-                bot=AsyncMock(), message=AsyncMock(), answer=AsyncMock(),
+            handler = next(
+                h.callback
+                for h in router.callback_query.handlers
+                if h.callback.__name__ == "deal_status_set"
             )
+            cq = SimpleNamespace(
+                data=f"deal:status_pick:{offer_id}:5",
+                from_user=SimpleNamespace(id=202),
+                bot=AsyncMock(),
+                message=AsyncMock(),
+                answer=AsyncMock(),
+            )
+            cq.message.chat.id = 202
             await handler(cq, state)
-            contacts = [call.kwargs["text"] for call in cq.bot.send_message.await_args_list if call.kwargs["chat_id"] == 202]
+            contacts = [
+                call.kwargs["text"]
+                for call in cq.bot.send_message.await_args_list
+                if call.kwargs["chat_id"] == 202
+            ]
             self.assertEqual(len(contacts), 1)
             self.assert_cdek_contacts(contacts[0])
         finally:
@@ -112,34 +133,51 @@ class ManagerRequisitesTests(unittest.IsolatedAsyncioTestCase):
     async def test_buyer_seller_and_final_payment_messages_use_new_details(self):
         update_manager_requisites(self.env_file)
         value = dotenv_values(self.env_file)["MANAGER_REQUISITES_TEXT"]
-        with patch.dict(os.environ, {
-            "BOT_TOKEN": "123456789:offline_payment_check_only",
-            "DB_PATH": ":memory:", "MANAGER_REQUISITES_TEXT": value,
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "123456789:offline_payment_check_only",
+                "DB_PATH": ":memory:",
+                "MANAGER_REQUISITES_TEXT": value,
+            },
+        ):
             cfg = load_config()
         db = Database(":memory:")
         try:
             await db.add_user(101, "buyer", "Buyer")
             await db.add_user(202, "seller", "Seller")
             request_id = await db.create_request(101, "Order", "Item", "Details", None)
+            await db.set_request_status(request_id, "approved")
             offer_id = await db.create_offer(request_id, 202, 100000, 3, 5, "photo")
             await db.set_offer_status(offer_id, "approved")
             router = Router()
             setup_offers_deals_handlers(router, db, cfg)
-            handlers = {h.callback.__name__: h.callback for h in router.callback_query.handlers}
+            handlers = {
+                h.callback.__name__: h.callback for h in router.callback_query.handlers
+            }
             cq = SimpleNamespace(
-                data=f"offer:buyer_accept:{offer_id}", from_user=SimpleNamespace(id=101),
-                bot=AsyncMock(), message=AsyncMock(), answer=AsyncMock(),
+                data=f"offer:buyer_accept:{offer_id}",
+                from_user=SimpleNamespace(id=101),
+                bot=AsyncMock(),
+                message=AsyncMock(),
+                answer=AsyncMock(),
             )
+            cq.message.chat.id = 101
             await handlers["offer_buyer_accept"](cq)
             self.assertEqual(cq.bot.send_message.await_count, 2)
             for call in cq.bot.send_message.await_args_list:
                 self.assert_payment_details(call.kwargs["text"])
             cq.bot.send_message.reset_mock()
+            await db.set_buyer_deposit_status(offer_id, "confirmed")
+            await db.set_seller_deposit_status(offer_id, "confirmed")
+            await db.set_workflow_flag(offer_id, "arrival_notified")
             cq.data = f"deal:buyer_accept:{offer_id}"
             await handlers["deal_buyer_accept"](cq)
             self.assert_payment_details(cq.bot.send_message.await_args.kwargs["text"])
-            self.assertIn("Остаток к оплате: 847.50 руб.", cq.bot.send_message.await_args.kwargs["text"])
+            self.assertIn(
+                "Остаток к оплате: 847.50 руб.",
+                cq.bot.send_message.await_args.kwargs["text"],
+            )
         finally:
             db.conn.close()
 

@@ -1,0 +1,33 @@
+[Unit]
+Description=Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tg-bot
+Group=tg-bot
+WorkingDirectory=/opt/tg_bot
+Environment=ENV_FILE=/etc/tg-bot/bot.env
+Environment=DB_PATH=/var/lib/tg-bot/bot.db
+Environment=FSM_PATH=/var/lib/tg-bot/state.sqlite
+Environment=LOCAL_BACKUP_DIRECTORY=/var/lib/tg-bot/backups
+Environment=RCLONE_CONFIG=/var/lib/tg-bot/rclone.conf
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/tg_bot/venv/bin/python /opt/tg_bot/main.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+StateDirectory=tg-bot
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/tg-bot
+
+[Install]
+WantedBy=multi-user.target

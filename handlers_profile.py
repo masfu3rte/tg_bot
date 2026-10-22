@@ -1,3 +1,10 @@
+from delivery import content
+import logging
+
+logger = logging.getLogger(__name__)
+from access import secure_messages
+from access import secure_callbacks
+from utils import escape_record
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -10,6 +17,9 @@ from utils import safe_username, work_chat_user
 
 
 def setup_profile_handlers(router: Router, db: Database, cfg: Config):
+    message_start = len(router.message.handlers)
+    callback_start = len(router.callback_query.handlers)
+
     async def build_referral_text(user_id: int, bot) -> str:
         code = await db.ensure_referral_code(user_id)
         count = await db.get_referral_count(user_id)
@@ -25,7 +35,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             f"Приглашено пользователей: {count}",
             f"Доход с комиссии: {balance:.2f} руб.",
             "",
-            '<a href="https://t.me/durov">Краткое руководство по реферальной программе</a>',
+            "Вознаграждение начисляется один раз за подтверждённую финальную оплату.",
             "",
             "Ваша реферальная ссылка:",
             link,
@@ -33,7 +43,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         return "\n".join(text_lines)
 
     async def send_profile_to(user_id: int, chat_id: int, bot):
-        profile = await db.get_profile_view(user_id)
+        profile = escape_record(await db.get_profile_view(user_id))
         username = safe_username(profile["username"], profile["user_id"])
 
         text_lines = [
@@ -67,17 +77,25 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
                     from_chat_id=cfg.ASSETS_CHANNEL_ID,
                     message_id=cfg.PROFILE_BANNER_MESSAGE_ID,
                     caption=text,
-                    reply_markup=Keyboards.profile_menu_inline(show_referrals=cfg.REFERRALS_VISIBLE),
+                    reply_markup=Keyboards.profile_menu_inline(
+                        show_referrals=cfg.REFERRALS_VISIBLE
+                    ),
                 )
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Optional Telegram operation failed: %s", type(exc).__name__
+                )
 
         # fallback: просто текст + кнопки
-        await bot.send_message(
-            chat_id=chat_id, text=text,
-            reply_markup=Keyboards.profile_menu_inline(show_referrals=cfg.REFERRALS_VISIBLE),
-        )
+        for job in content(
+            chat_id,
+            text,
+            reply_markup=Keyboards.profile_menu_inline(
+                show_referrals=cfg.REFERRALS_VISIBLE
+            ),
+        ):
+            await getattr(bot, job["method"])(**job["kwargs"])
 
     async def send_profile(msg: Message):
         await send_profile_to(msg.from_user.id, msg.chat.id, msg.bot)
@@ -89,7 +107,9 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
     @router.message(F.text == "🤝 Реферальная система")
     async def my_referrals(msg: Message):
         if not cfg.REFERRALS_VISIBLE:
-            await msg.answer("Раздел сейчас недоступен.", reply_markup=Keyboards.bottom_menu())
+            await msg.answer(
+                "Раздел сейчас недоступен.", reply_markup=Keyboards.bottom_menu()
+            )
             return
         user_id = msg.from_user.id
         text = await build_referral_text(user_id, msg.bot)
@@ -104,9 +124,11 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         text = await build_referral_text(user_id, cq.bot)
         try:
             await cq.message.delete()
-        except Exception:
-            pass
-        await cq.message.answer(text, reply_markup=Keyboards.referral_withdraw_back_kb())
+        except Exception as exc:
+            logger.warning("Optional Telegram operation failed: %s", type(exc).__name__)
+        await cq.message.answer(
+            text, reply_markup=Keyboards.referral_withdraw_back_kb()
+        )
         await cq.answer()
 
     @router.callback_query(F.data == "referral:withdraw")
@@ -121,11 +143,13 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
             return
 
         if not await db.request_referral_withdrawal(user_id, balance_cents):
-            await cq.answer("Не удалось оформить вывод, попробуйте позже.", show_alert=True)
+            await cq.answer(
+                "Не удалось оформить вывод, попробуйте позже.", show_alert=True
+            )
             return
 
         amount = balance_cents / 100.0
-        req = await db.get_requisites(user_id) or {}
+        req = escape_record(await db.get_requisites(user_id)) or {}
         req_text = (
             f"ФИО: {req.get('fio') or '—'}\n"
             f"Карта: {req.get('card') or '—'}\n"
@@ -156,9 +180,13 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
 
         text = await build_referral_text(user_id, cq.bot)
         try:
-            await cq.message.edit_text(text, reply_markup=Keyboards.referral_withdraw_back_kb())
+            await cq.message.edit_text(
+                text, reply_markup=Keyboards.referral_withdraw_back_kb()
+            )
         except Exception:
-            await cq.message.answer(text, reply_markup=Keyboards.referral_withdraw_back_kb())
+            await cq.message.answer(
+                text, reply_markup=Keyboards.referral_withdraw_back_kb()
+            )
         await cq.answer("Запрос на вывод отправлен модератору.")
 
     @router.callback_query(F.data == "profile:cdek")
@@ -166,8 +194,8 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         await state.set_state(ProfileEdit.waiting_for_cdek_form)
         try:
             await cq.message.delete()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Optional Telegram operation failed: %s", type(exc).__name__)
         await cq.message.answer(
             "<b>Отправьте контактные данные CDEK тремя строками в формате:</b>\n"
             "ФИО\nтелефон\nадрес ПВЗ",
@@ -180,8 +208,8 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         await state.set_state(ProfileEdit.waiting_for_req_form)
         try:
             await cq.message.delete()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Optional Telegram operation failed: %s", type(exc).__name__)
         await cq.message.answer(
             "Отправьте банковские реквизиты тремя строками в формате:\n"
             "ФИО\nномер карты\nбанк",
@@ -211,8 +239,10 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
                         reply_markup=Keyboards.my_requests_menu(),
                     )
                     return True
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Optional Telegram operation failed: %s", type(exc).__name__
+                    )
             await msg.answer(caption, reply_markup=Keyboards.my_requests_menu())
             return True
         if text == "📮 Мои отклики":
@@ -228,8 +258,10 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
                         reply_markup=Keyboards.my_offers_menu(),
                     )
                     return True
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Optional Telegram operation failed: %s", type(exc).__name__
+                    )
             await msg.answer(caption, reply_markup=Keyboards.my_offers_menu())
             return True
         if text == "Вернуться":
@@ -242,8 +274,8 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
     async def profile_back(cq: CallbackQuery, state: FSMContext):
         try:
             await cq.message.delete()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Optional Telegram operation failed: %s", type(exc).__name__)
         await state.clear()
         await send_profile_to(cq.from_user.id, cq.message.chat.id, cq.bot)
         await cq.answer()
@@ -253,7 +285,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         if await handle_profile_exit(msg, state):
             return
         parts = [p.strip() for p in (msg.text or "").splitlines() if p.strip()]
-        if len(parts) != 3:
+        if len(parts) != 3 or any(len(part) > 300 for part in parts):
             await msg.answer("Нужно три строки: ФИО, телефон, адрес ПВЗ СДЕК.")
             return
         fio, phone, pvz = parts
@@ -267,7 +299,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         if await handle_profile_exit(msg, state):
             return
         parts = [p.strip() for p in (msg.text or "").splitlines() if p.strip()]
-        if len(parts) != 3:
+        if len(parts) != 3 or any(len(part) > 300 for part in parts):
             await msg.answer("Нужно три строки: ФИО, номер карты, банк.")
             return
         fio, card, bank = parts
@@ -275,3 +307,7 @@ def setup_profile_handlers(router: Router, db: Database, cfg: Config):
         await state.clear()
         await msg.answer("Банковские реквизиты обновлены.")
         await send_profile(msg)
+
+    secure_callbacks(router, db, cfg, callback_start)
+
+    secure_messages(router, db, cfg, message_start)

@@ -1,55 +1,42 @@
+"""Run separately with a test token; show forwarded message and photo identifiers."""
+
 import asyncio
 import logging
-import os
-
-from aiogram import Bot, Dispatcher, Router, F
+from aiogram import Bot, Dispatcher, Router
 from aiogram.types import Message
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from dotenv import load_dotenv
-
-load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
-    raise RuntimeError(
-        "Не найдена обязательная переменная окружения BOT_TOKEN. "
-        "Создайте .env на основе .env.example и заполните значение."
-    )
+from config import load_config
 
 router = Router()
 
 
-
 @router.message()
 async def debug_ids(msg: Message):
-    # Если сообщение переслано из канала/чата
-    if msg.forward_from_chat:
-        chat_id = msg.forward_from_chat.id
-        message_id = msg.forward_from_message_id
-        await msg.answer(
-            f"channel_id = <code>{chat_id}</code>\n"
-            f"message_id = <code>{message_id}</code>"
-        )
+    origin = msg.forward_origin
+    if origin and origin.type == "channel":
+        text = f"channel_id = <code>{origin.chat.id}</code>\nmessage_id = <code>{origin.message_id}</code>"
     else:
-        # Если это обычное сообщение (НЕ пересланное) — покажем просто текущий чат
-        await msg.answer(
-            f"chat_id = <code>{msg.chat.id}</code>\n"
-            f"message_id = <code>{msg.message_id}</code>"
-        )
+        text = f"chat_id = <code>{msg.chat.id}</code>\nmessage_id = <code>{msg.message_id}</code>"
+    if msg.photo:
+        from utils import escape_text
 
+        text += f"\nfile_id = <code>{escape_text(msg.photo[-1].file_id)}</code>"
+    await msg.answer(text)
 
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-
+    cfg = load_config()
     bot = Bot(
-        token=TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        token=cfg.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     dp = Dispatcher()
     dp.include_router(router)
-
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":

@@ -14,6 +14,8 @@ class RequestCreate(StatesGroup):
 
 
 class RequestEdit(StatesGroup):
+    choosing_field = State()
+    waiting_for_value = State()
     waiting_for_internal_title = State()
     waiting_for_item_name = State()
     waiting_for_description = State()

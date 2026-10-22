@@ -12,23 +12,41 @@ class Keyboards:
         return ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="🧾 Мои запросы")],
-                [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="📮 Мои отклики")],
+                [
+                    KeyboardButton(text="👤 Мой профиль"),
+                    KeyboardButton(text="📮 Мои отклики"),
+                ],
             ],
             resize_keyboard=True,
         )
 
     @staticmethod
     def start_menu(
-        offer_url: str, channel_url: str, privacy_policy_url: str, show_accept: bool = True
+        offer_url: str,
+        channel_url: str,
+        privacy_policy_url: str,
+        show_accept: bool = True,
     ) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="📄 Публичная оферта", url=offer_url)],
-                [InlineKeyboardButton(text="Политика обработки данных", url=privacy_policy_url)],
+                [
+                    InlineKeyboardButton(
+                        text="Политика обработки данных", url=privacy_policy_url
+                    )
+                ],
                 [InlineKeyboardButton(text="📢 Канал сервиса", url=channel_url)],
-            ] + (
-                [[InlineKeyboardButton(text="✅ Принимаю условия", callback_data="offer:accept")]]
-                if show_accept else []
+            ]
+            + (
+                [
+                    [
+                        InlineKeyboardButton(
+                            text="✅ Принимаю условия", callback_data="offer:accept"
+                        )
+                    ]
+                ]
+                if show_accept
+                else []
             )
         )
 
@@ -43,8 +61,22 @@ class Keyboards:
             inline_keyboard=[
                 [InlineKeyboardButton(text="🆘 Техподдержка", url=support_url)],
                 [InlineKeyboardButton(text="📢 Канал сервиса", url=channel_url)],
-                [InlineKeyboardButton(text="🧾 Канал с запросами", url=requests_channel_url)],
-                [InlineKeyboardButton(text="💰 Размещение рекламы", url=ads_url)],
+                *(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                text="🧾 Канал с запросами", url=requests_channel_url
+                            )
+                        ]
+                    ]
+                    if requests_channel_url
+                    else []
+                ),
+                *(
+                    [[InlineKeyboardButton(text="💰 Размещение рекламы", url=ads_url)]]
+                    if ads_url
+                    else []
+                ),
             ]
         )
 
@@ -62,6 +94,11 @@ class Keyboards:
                         text="Активные запросы", callback_data="requests:active"
                     )
                 ],
+                [
+                    InlineKeyboardButton(
+                        text="Архив запросов", callback_data="requests:archive"
+                    )
+                ],
                 [InlineKeyboardButton(text="Вернуться", callback_data="requests:back")],
             ]
         )
@@ -70,7 +107,11 @@ class Keyboards:
     def new_request_skip_photo_kb() -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Пропустить фото", callback_data="request:skip_photo")]
+                [
+                    InlineKeyboardButton(
+                        text="Пропустить фото", callback_data="request:skip_photo"
+                    )
+                ]
             ]
         )
 
@@ -82,7 +123,11 @@ class Keyboards:
                     text="✏️ Контактные данные CDEK", callback_data="profile:cdek"
                 )
             ],
-            [InlineKeyboardButton(text="✏️ Банковские реквизиты", callback_data="profile:req")],
+            [
+                InlineKeyboardButton(
+                    text="✏️ Банковские реквизиты", callback_data="profile:req"
+                )
+            ],
         ]
         if show_referrals:
             rows.append(
@@ -137,15 +182,19 @@ class Keyboards:
         )
 
     @staticmethod
-    def moderation_request_kb(request_id: int) -> InlineKeyboardMarkup:
+    def moderation_request_kb(
+        request_id: int, revision: int = 0
+    ) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="✅ Одобрить", callback_data=f"request:approve:{request_id}"
+                        text="✅ Одобрить",
+                        callback_data=f"request:approve:{request_id}:{revision}",
                     ),
                     InlineKeyboardButton(
-                        text="❌ Отклонить", callback_data=f"request:reject:{request_id}"
+                        text="❌ Отклонить",
+                        callback_data=f"request:reject:{request_id}:{revision}",
                     ),
                 ]
             ]
@@ -166,11 +215,15 @@ class Keyboards:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="«", callback_data=f"ur:prev:{request_id}"),
+                    InlineKeyboardButton(
+                        text="«", callback_data=f"ur:prev:{request_id}"
+                    ),
                     InlineKeyboardButton(
                         text=f"{index}/{total}", callback_data=f"ur:noop:{request_id}"
                     ),
-                    InlineKeyboardButton(text="»", callback_data=f"ur:next:{request_id}"),
+                    InlineKeyboardButton(
+                        text="»", callback_data=f"ur:next:{request_id}"
+                    ),
                 ],
                 [
                     InlineKeyboardButton(
@@ -195,6 +248,11 @@ class Keyboards:
     def my_offers_menu() -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Архив откликов", callback_data="offers:archive"
+                    )
+                ],
                 [
                     InlineKeyboardButton(
                         text="Активные отклики", callback_data="offers:active"
@@ -250,10 +308,12 @@ class Keyboards:
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="✅ Принять отклик", callback_data=f"offer:approve:{offer_id}"
+                        text="✅ Принять отклик",
+                        callback_data=f"offer:approve:{offer_id}",
                     ),
                     InlineKeyboardButton(
-                        text="❌ Отклонить отклик", callback_data=f"offer:reject:{offer_id}"
+                        text="❌ Отклонить отклик",
+                        callback_data=f"offer:reject:{offer_id}",
                     ),
                 ]
             ]
@@ -290,18 +350,18 @@ class Keyboards:
 
     @staticmethod
     def deal_payment_moderation_kb(
-        offer_id: int, side: str
+        offer_id: int, side: str, version: int = 0
     ) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
                         text="🔘 Оплата прошла",
-                        callback_data=f"deal:confirm:{side}:{offer_id}",
+                        callback_data=f"deal:confirm:{side}:{offer_id}:{version}",
                     ),
                     InlineKeyboardButton(
                         text="🔘 Оплата не прошла",
-                        callback_data=f"deal:cancel:{side}:{offer_id}",
+                        callback_data=f"deal:cancel:{side}:{offer_id}:{version}",
                     ),
                 ]
             ]

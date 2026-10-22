@@ -1,3 +1,8 @@
+import logging
+
+logger = logging.getLogger(__name__)
+from access import secure_messages
+from utils import escape_record
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -6,10 +11,56 @@ from config import Config
 from db import Database
 from keyboards import Keyboards
 from states import RequestCreate
+from utils import escape_text
+from access import secure_callbacks
+from delivery import content, enqueue, queue_batch
 from utils import build_direct_link, work_chat_user
 
 
 def setup_requests_handlers(router: Router, db: Database, cfg: Config):
+    message_start = len(router.message.handlers)
+    callback_start = len(router.callback_query.handlers)
+
+    async def submit_request(user, msg, bot, state, photo):
+        if not await db.is_offer_accepted(user.id):
+            await msg.answer("Сначала примите условия через /start.")
+            return
+        data = await state.get_data()
+        if not all(
+            data.get(key) for key in ("internal_title", "item_name", "description")
+        ):
+            await msg.answer("Форма устарела. Начните новый запрос.")
+            return
+        request_id = data.get("saved_request_id")
+        if not request_id:
+            request_id = await db.create_request(
+                user.id,
+                data["internal_title"],
+                data["item_name"],
+                data["description"],
+                photo,
+            )
+            await state.update_data(saved_request_id=request_id)
+        text = (
+            f"Новый запрос #{request_id}\nОт: {work_chat_user(user.username,user.id)}\n\n"
+            f"{escape_text(data['internal_title'])}\nЧто нужно: {escape_text(data['item_name'])}\n"
+            f"Описание: {escape_text(data['description'])}"
+        )
+        jobs = content(
+            cfg.MODERATION_CHAT_ID,
+            text,
+            photo=photo,
+            message_thread_id=cfg.MODERATION_TOPIC_ID,
+            reply_markup=Keyboards.moderation_request_kb(request_id),
+        )
+        delivered = await queue_batch(db, bot, f"new-request-{request_id}", jobs)
+        await state.clear()
+        await msg.answer(
+            "Ваш запрос отправлен на модерацию."
+            if delivered
+            else "Запрос сохранён. Доставка модератору будет повторена автоматически."
+        )
+
     async def send_my_requests_menu(chat_id: int, bot):
         caption = (
             "Снизу вы можете управлять и следить за вашими созданными запросами, а так же "
@@ -25,8 +76,10 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
                     reply_markup=Keyboards.my_requests_menu(),
                 )
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Optional Telegram operation failed: %s", type(exc).__name__
+                )
         await bot.send_message(
             chat_id=chat_id,
             text=caption,
@@ -40,10 +93,14 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
     @router.message(F.text == "Вернуться")
     async def back_to_main(msg: Message):
         from keyboards import Keyboards as K
+
         await msg.answer("Главное меню:", reply_markup=K.bottom_menu())
 
     @router.message(F.text == "Создать новый запрос")
     async def new_request_start(msg: Message, state: FSMContext):
+        if not await db.is_offer_accepted(msg.from_user.id):
+            await msg.answer("Сначала примите условия через /start.")
+            return
         if not await db.has_full_profile(msg.from_user.id):
             await msg.answer(
                 "Перед созданием запроса заполните, пожалуйста, контактные данные CDEK "
@@ -57,8 +114,11 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
     async def new_request_start_inline(cq: CallbackQuery, state: FSMContext):
         try:
             await cq.message.delete()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Optional Telegram operation failed: %s", type(exc).__name__)
+        if not await db.is_offer_accepted(cq.from_user.id):
+            await cq.answer("Сначала примите условия через /start.", show_alert=True)
+            return
         if not await db.has_full_profile(cq.from_user.id):
             await cq.message.answer(
                 "Перед созданием запроса заполните, пожалуйста, контактные данные CDEK "
@@ -67,16 +127,19 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
             await cq.answer()
             return
         await state.set_state(RequestCreate.waiting_for_internal_title)
-        await cq.message.answer("Укажите личное название запроса. Оно будет видно только вам.")
+        await cq.message.answer(
+            "Укажите личное название запроса. Оно будет видно только вам."
+        )
         await cq.answer()
 
     @router.callback_query(F.data == "requests:back")
     async def back_to_main_inline(cq: CallbackQuery):
         from keyboards import Keyboards as K
+
         try:
             await cq.message.delete()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Optional Telegram operation failed: %s", type(exc).__name__)
         await cq.message.answer("Главное меню:", reply_markup=K.bottom_menu())
         await cq.answer()
 
@@ -84,30 +147,60 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
     async def back_to_requests_menu_inline(cq: CallbackQuery):
         try:
             await cq.message.delete()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Optional Telegram operation failed: %s", type(exc).__name__)
         await send_my_requests_menu(cq.message.chat.id, cq.bot)
         await cq.answer()
 
     @router.message(RequestCreate.waiting_for_internal_title)
     async def req_internal_title(msg: Message, state: FSMContext):
-        await state.update_data(internal_title=msg.text.strip())
+        value = (msg.text or "").strip()
+        if not value or len(value) > 100:
+            await msg.answer("Отправьте текст от 1 до 100 символов.")
+            return
+        await state.update_data(internal_title=value)
         await state.set_state(RequestCreate.waiting_for_item_name)
-        await msg.answer("Укажите публичное название товара по которому продавец сможет его найти.")
+        await msg.answer(
+            "Укажите публичное название товара.",
+            reply_markup=(
+                Keyboards.new_request_skip_photo_kb()
+                if "internal_title" == "description"
+                else None
+            ),
+        )
 
     @router.message(RequestCreate.waiting_for_item_name)
     async def req_item_name(msg: Message, state: FSMContext):
-        await state.update_data(item_name=msg.text.strip())
+        value = (msg.text or "").strip()
+        if not value or len(value) > 150:
+            await msg.answer("Отправьте текст от 1 до 150 символов.")
+            return
+        await state.update_data(item_name=value)
         await state.set_state(RequestCreate.waiting_for_description)
-        await msg.answer("Укажите детали, необходимый цвет, предпочтительные сроки доставки и состояние товара.")
+        await msg.answer(
+            "Укажите детали, цвет, сроки и состояние товара.",
+            reply_markup=(
+                Keyboards.new_request_skip_photo_kb()
+                if "item_name" == "description"
+                else None
+            ),
+        )
 
     @router.message(RequestCreate.waiting_for_description)
     async def req_description(msg: Message, state: FSMContext):
-        await state.update_data(description=msg.text.strip())
+        value = (msg.text or "").strip()
+        if not value or len(value) > 1500:
+            await msg.answer("Отправьте текст от 1 до 1500 символов.")
+            return
+        await state.update_data(description=value)
         await state.set_state(RequestCreate.waiting_for_photo)
         await msg.answer(
-            "Отправьте фотографию товара/примера для успешного поиска продавцом. (Только одно фото)",
-            reply_markup=Keyboards.new_request_skip_photo_kb(),
+            "Пришлите одно фото товара или пропустите этот шаг.",
+            reply_markup=(
+                Keyboards.new_request_skip_photo_kb()
+                if "description" == "description"
+                else None
+            ),
         )
 
     @router.message(RequestCreate.waiting_for_photo, ~F.photo)
@@ -120,186 +213,131 @@ def setup_requests_handlers(router: Router, db: Database, cfg: Config):
 
     @router.callback_query(F.data == "request:skip_photo")
     async def req_skip_photo(cq: CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        await state.clear()
-        user = cq.from_user
-
-        request_id = await db.create_request(
-            user_id=user.id,
-            internal_title=data["internal_title"],
-            item_name=data["item_name"],
-            description=data["description"],
-            photo_file_id=None,
-        )
-
-        text = (
-            f"Новый запрос #{request_id}\n"
-            f"От: {work_chat_user(user.username, user.id)}\n\n"
-            f"{data['internal_title']}\n\n"
-            f"Что нужно: {data['item_name']}\n\n"
-            f"Описание:\n{data['description']}"
-        )
-        await cq.bot.send_message(
-            chat_id=cfg.MODERATION_CHAT_ID,
-            message_thread_id=cfg.MODERATION_TOPIC_ID,
-            text=text,
-            reply_markup=Keyboards.moderation_request_kb(request_id),
-        )
-
-        confirmation_text = (
-            "Ваш запрос отправлен на модерацию. После проверки он будет опубликован в канале."
-        )
-
-        if cfg.ASSETS_CHANNEL_ID and cfg.REQUEST_SENT_BANNER_MESSAGE_ID:
-            try:
-                await cq.bot.copy_message(
-                    chat_id=user.id,
-                    from_chat_id=cfg.ASSETS_CHANNEL_ID,
-                    message_id=cfg.REQUEST_SENT_BANNER_MESSAGE_ID,
-                    caption=confirmation_text,
-                )
-            except Exception:
-                await cq.bot.send_message(chat_id=user.id, text=confirmation_text)
-        else:
-            await cq.bot.send_message(chat_id=user.id, text=confirmation_text)
+        if await state.get_state() != RequestCreate.waiting_for_photo.state:
+            await cq.answer("Кнопка устарела. Откройте форму заново.", show_alert=True)
+            return
+        await submit_request(cq.from_user, cq.message, cq.bot, state, None)
         await cq.answer()
 
     @router.message(RequestCreate.waiting_for_photo, F.photo)
     async def req_photo(msg: Message, state: FSMContext):
-        data = await state.get_data()
-        await state.clear()
-        user = msg.from_user
-        photo = msg.photo[-1]
-
-        request_id = await db.create_request(
-            user_id=user.id,
-            internal_title=data["internal_title"],
-            item_name=data["item_name"],
-            description=data["description"],
-            photo_file_id=photo.file_id,
-        )
-
-        caption = (
-            f"Новый запрос #{request_id}\n"
-            f"От: {work_chat_user(user.username, user.id)}\n\n"
-            f"{data['internal_title']}\n\n"
-            f"Что нужно: {data['item_name']}\n\n"
-            f"Описание:\n{data['description']}"
-        )
-
-        await msg.bot.send_photo(
-            chat_id=cfg.MODERATION_CHAT_ID,
-            message_thread_id=cfg.MODERATION_TOPIC_ID,
-            photo=photo.file_id,
-            caption=caption,
-            reply_markup=Keyboards.moderation_request_kb(request_id),
-        )
-
-        confirmation_text = (
-            "Ваш запрос отправлен на модерацию. После проверки он будет опубликован в канале."
-        )
-
-        if cfg.ASSETS_CHANNEL_ID and cfg.REQUEST_SENT_BANNER_MESSAGE_ID:
-            try:
-                await msg.bot.copy_message(
-                    chat_id=user.id,
-                    from_chat_id=cfg.ASSETS_CHANNEL_ID,
-                    message_id=cfg.REQUEST_SENT_BANNER_MESSAGE_ID,
-                    caption=confirmation_text,
-                )
-            except Exception:
-                await msg.answer(confirmation_text)
-        else:
-            await msg.answer(confirmation_text)
+        await submit_request(msg.from_user, msg, msg.bot, state, msg.photo[-1].file_id)
 
     # ===== модерация запросов =====
 
     @router.callback_query(F.data.startswith("request:approve:"))
     async def approve_request(cq: CallbackQuery):
-        request_id = int(cq.data.split(":")[-1])
-        req = await db.get_request(request_id)
-        if not req:
-            await cq.answer("Запрос не найден.", show_alert=True)
+        request_id = int(cq.data.split(":")[2])
+        req = escape_record(await db.get_request(request_id))
+        if not req or req["status"] != "pending":
+            await cq.answer("Заявка уже обработана.", show_alert=True)
             return
-
-        await db.set_request_status(request_id, "approved")
-
-        # пост в канал (как на скрине)
-        post_text = (
-            f"Заявка №{request_id}\n"
-            f"• Название: {req['item_name']}\n"
-            f"• Описание: {req['description']}"
+        post_text = f"Заявка №{request_id}\n• Название: {escape_text(req['item_name'])}\n• Описание: {escape_text(req['description'])}"
+        me = await cq.bot.get_me()
+        jobs = content(
+            cfg.REQUESTS_PUBLIC_CHANNEL_ID,
+            post_text,
+            photo=req["photo_file_id"],
+            reply_markup=Keyboards.request_public_kb(
+                f"https://t.me/{me.username}?start=req_{request_id}"
+            ),
+            effect={
+                "kind": "publish_request",
+                "id": request_id,
+                "revision": req["revision"],
+            },
         )
-
-        bot_me = await cq.bot.get_me()
-        bot_link = f"https://t.me/{bot_me.username}?start=req_{request_id}"
-
-        if req["photo_file_id"]:
-            sent = await cq.bot.send_photo(
-                chat_id=cfg.REQUESTS_PUBLIC_CHANNEL_ID,
-                photo=req["photo_file_id"],
-                caption=post_text,
-                reply_markup=Keyboards.request_public_kb(bot_link),
+        if req.get("channel_message_id") and (
+            not req["channel_is_photo"] or len(post_text) <= 950
+        ):
+            method = (
+                "edit_message_caption"
+                if req["channel_is_photo"]
+                else "edit_message_text"
             )
-            is_photo = True
-        else:
-            sent = await cq.bot.send_message(
+            kwargs = dict(
                 chat_id=cfg.REQUESTS_PUBLIC_CHANNEL_ID,
-                text=post_text,
-                reply_markup=Keyboards.request_public_kb(bot_link),
-            )
-            is_photo = False
-
-        # сохранить message_id поста
-        await db.save_request_channel_message(
-            request_id=request_id, message_id=sent.message_id, is_photo=is_photo
-        )
-
-        # ссылка именно на пост
-        post_link = build_direct_link(cfg, sent.message_id)
-        owner_id = req["user_id"]
-        try:
-            await cq.bot.send_message(
-                chat_id=owner_id,
-                text=(
-                    f"Ваш <a href='{post_link}'>запрос №{request_id}</a> одобрен и опубликован в канале.\n"
-                    f"Вам придет уведомление если кто-то откликнется на ваш запрос."
+                message_id=req["channel_message_id"],
+                reply_markup=Keyboards.request_public_kb(
+                    f"https://t.me/{me.username}?start=req_{request_id}"
                 ),
-                parse_mode="HTML",
             )
-        except Exception:
-            pass
-
-        # убрать кнопки модерации под исходным сообщением
-        try:
-            await cq.message.edit_reply_markup(reply_markup=None)
-        except Exception:
-            pass
-
-        await cq.answer("Запрос одобрен.")
+            kwargs["caption" if req["channel_is_photo"] else "text"] = post_text
+            jobs = [
+                dict(
+                    method=method,
+                    kwargs=kwargs,
+                    effect={
+                        "kind": "publish_request",
+                        "id": request_id,
+                        "revision": req["revision"],
+                    },
+                )
+            ]
+        elif req.get("channel_message_id"):
+            deletes = [
+                dict(
+                    method="delete_message",
+                    kwargs=dict(chat_id=cfg.REQUESTS_PUBLIC_CHANNEL_ID, message_id=mid),
+                )
+                for mid in (
+                    req.get("channel_message_id"),
+                    req.get("channel_media_message_id"),
+                )
+                if mid
+            ]
+            jobs = deletes + jobs
+        with db.conn:
+            changed = db.conn.execute(
+                "UPDATE requests SET status='publishing' WHERE id=? AND status='pending'",
+                (request_id,),
+            ).rowcount
+            if not changed:
+                await cq.answer("Публикация уже запущена.")
+                return
+            enqueue(db, f'publish-request-{request_id}-{req["revision"]}', jobs)
+        delivered = await queue_batch(
+            db, cq.bot, f'publish-request-{request_id}-{req["revision"]}', jobs
+        )
+        if delivered:
+            req = escape_record(await db.get_request(request_id))
+            link = build_direct_link(cfg, req["channel_message_id"])
+            await queue_batch(
+                db,
+                cq.bot,
+                f"request-approved-notify-{request_id}",
+                content(
+                    req["user_id"],
+                    f'Ваш <a href="{link}">запрос №{request_id}</a> опубликован.',
+                ),
+            )
+        await cq.message.edit_reply_markup(reply_markup=None)
+        await cq.answer(
+            "Запрос опубликован."
+            if delivered
+            else "Публикация сохранена в очереди. Проверяйте /delivery_status."
+        )
 
     @router.callback_query(F.data.startswith("request:reject:"))
     async def reject_request(cq: CallbackQuery):
-        request_id = int(cq.data.split(":")[-1])
-        req = await db.get_request(request_id)
-        if not req:
-            await cq.answer("Запрос не найден.", show_alert=True)
-            return
-
-        await db.set_request_status(request_id, "rejected")
-        owner_id = req["user_id"]
-
-        try:
-            await cq.bot.send_message(
-                chat_id=owner_id,
-                text=f"Ваш запрос №{request_id} отклонён модератором.",
+        request_id = int(cq.data.split(":")[2])
+        req = escape_record(await db.get_request(request_id))
+        with db.conn:
+            changed = db.conn.execute(
+                "UPDATE requests SET status='rejected' WHERE id=? AND status='pending'",
+                (request_id,),
+            ).rowcount
+            if not changed:
+                await cq.answer("Заявка уже обработана.")
+                return
+            jobs = content(
+                req["user_id"], f"Ваш запрос №{request_id} отклонён модератором."
             )
-        except Exception:
-            pass
-
-        try:
-            await cq.message.edit_reply_markup(reply_markup=None)
-        except Exception:
-            pass
-
+            enqueue(db, f"request-rejected-{request_id}", jobs)
+        await queue_batch(db, cq.bot, f"request-rejected-{request_id}", jobs)
+        await cq.message.edit_reply_markup(reply_markup=None)
         await cq.answer("Запрос отклонён.")
+
+    secure_callbacks(router, db, cfg, callback_start)
+
+    secure_messages(router, db, cfg, message_start)

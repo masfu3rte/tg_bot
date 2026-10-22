@@ -1,3 +1,6 @@
+from access import secure_messages
+from access import secure_callbacks
+from utils import escape_record
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart, Command
@@ -18,6 +21,9 @@ WELCOME_TEXT = (
 
 
 def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
+    message_start = len(router.message.handlers)
+    callback_start = len(router.callback_query.handlers)
+
     async def send_documents(msg: Message, show_accept: bool = True):
         await msg.answer(
             "Перед началом использования сервиса просьба "
@@ -45,7 +51,9 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
                 pass
         await msg.answer(WELCOME_TEXT, reply_markup=Keyboards.bottom_menu())
 
-    async def start_request_offer(msg: Message, user_id: int, payload: str, state: FSMContext):
+    async def start_request_offer(
+        msg: Message, user_id: int, payload: str, state: FSMContext
+    ):
         try:
             request_id = int(payload.split("_", 1)[1])
         except ValueError:
@@ -55,11 +63,20 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
             await msg.answer("Заявка не найдена.")
             return
 
-        req = await db.get_request(request_id)
-        if not req or req["status"] == "deleted":
+        req = escape_record(await db.get_request(request_id))
+        if not req or req["status"] != "approved":
             await msg.answer("Заявка не найдена или была удалена.")
             return
 
+        if (
+            req["user_id"] == user_id
+            or db.conn.execute(
+                "SELECT 1 FROM offers WHERE request_id=? AND status IN ('buyer_accepted','dispute')",
+                (request_id,),
+            ).fetchone()
+        ):
+            await msg.answer("На эту заявку нельзя откликнуться.")
+            return
         if not await db.has_full_profile(user_id):
             await msg.answer(
                 "Перед откликом заполните, пожалуйста, контактные данные CDEK "
@@ -141,7 +158,9 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
         await cq.answer()
         await send_welcome_message(cq.message)
         if pending_request_payload:
-            await start_request_offer(cq.message, user_id, pending_request_payload, state)
+            await start_request_offer(
+                cq.message, user_id, pending_request_payload, state
+            )
 
     @router.message(Command("help"))
     async def help_cmd(msg: Message):
@@ -154,3 +173,7 @@ def setup_start_help_handlers(router: Router, db: Database, cfg: Config):
                 ads_url=cfg.ADS_URL,
             ),
         )
+
+    secure_callbacks(router, db, cfg, callback_start)
+
+    secure_messages(router, db, cfg, message_start)

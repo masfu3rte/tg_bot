@@ -12,23 +12,26 @@ from config import BackupConfig
 class BackupDependencyTests(unittest.TestCase):
     def test_bot_reaches_polling_without_pyrage_when_backups_are_disabled(self):
         # A fresh process reproduces the server failure even when pyrage is installed here.
-        script = """
+        script = r"""
 import asyncio
 import os
 import sys
 from unittest.mock import AsyncMock, patch
 sys.modules['pyrage'] = None
-with patch.dict(os.environ, {'BOT_TOKEN': '123456789:offline_startup_only', 'DB_PATH': ':memory:', 'BACKUP_ENABLED': '0'}):
+with patch.dict(os.environ, {'BOT_TOKEN': '123456789:offline_startup_only', 'DB_PATH': ':memory:', 'BACKUP_ENABLED': '0', 'FSM_PATH': ':memory:', 'MODERATION_CHAT_ID': '-100123', 'REQUESTS_PUBLIC_CHANNEL_ID': '-100456', 'MANAGER_REQUISITES_TEXT': 'Header\nAccount\nBank', 'MANAGER_CDEK_CONTACT_TEXT': 'Header\nPerson\nAddress'}):
     import main
     with patch.object(main.Dispatcher, 'start_polling', new_callable=AsyncMock) as polling:
-        with patch.object(main, 'start_reports_task'):
+        with patch.object(main, 'start_reports_task', return_value=None):
             asyncio.run(main.main())
     polling.assert_awaited_once()
 print('polling reached')
 """
         result = subprocess.run(
-            [sys.executable, "-c", script], cwd=Path(__file__).resolve().parents[1],
-            capture_output=True, text=True, timeout=30,
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("polling reached", result.stdout)
@@ -36,7 +39,9 @@ print('polling reached')
     def test_enabled_backups_log_missing_package_without_stopping_bot(self):
         cfg = BackupConfig(True, "unused.sqlite", "gdrive", "age1test", 3600)
         with patch("backups.load_backup_config", return_value=cfg):
-            with patch("backups.import_module", side_effect=ModuleNotFoundError("pyrage")):
+            with patch(
+                "backups.import_module", side_effect=ModuleNotFoundError("pyrage")
+            ):
                 with self.assertLogs("backups", level="ERROR") as logs:
                     task = backups.start_backup_task()
         self.assertIsNone(task)
@@ -53,7 +58,9 @@ print('polling reached')
     def test_missing_package_does_not_create_private_key_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "key.agekey"
-            with patch("backups.import_module", side_effect=ModuleNotFoundError("pyrage")):
+            with patch(
+                "backups.import_module", side_effect=ModuleNotFoundError("pyrage")
+            ):
                 with self.assertRaisesRegex(backups.BackupError, "pyrage"):
                     backups.generate_key(path)
             self.assertFalse(path.exists())

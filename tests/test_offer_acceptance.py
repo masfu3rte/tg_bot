@@ -1,3 +1,4 @@
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -26,7 +27,9 @@ class OfferAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         await self.db.set_offer_accepted(101, True)
         after = datetime.now(timezone.utc)
         user = await self.db.get_user(101)
-        recorded = datetime.strptime(user["offer_first_accepted_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        recorded = datetime.strptime(
+            user["offer_first_accepted_at"], "%Y-%m-%d %H:%M:%S"
+        ).replace(tzinfo=timezone.utc)
         self.assertLessEqual(before, recorded)
         self.assertLessEqual(recorded, after)
         self.assertTrue(user["offer_accepted"])
@@ -61,7 +64,7 @@ class OfferAcceptanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_existing_database_migrates_without_inventing_historical_times(self):
         with tempfile.TemporaryDirectory() as directory:
             path = str(Path(directory) / "legacy.sqlite")
-            with sqlite3.connect(path) as conn:
+            with closing(sqlite3.connect(path)) as conn, conn:
                 conn.execute("""
                     CREATE TABLE users (
                         user_id INTEGER PRIMARY KEY,
@@ -90,8 +93,12 @@ class OfferAcceptanceTests(unittest.IsolatedAsyncioTestCase):
                 db.conn.close()
             reopened = Database(path)
             try:
-                self.assertEqual((await reopened.get_user(101))["offer_first_accepted_at"], recorded)
-                self.assertEqual(reopened.conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+                self.assertEqual(
+                    (await reopened.get_user(101))["offer_first_accepted_at"], recorded
+                )
+                self.assertEqual(
+                    reopened.conn.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+                )
             finally:
                 reopened.conn.close()
 

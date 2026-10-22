@@ -3,6 +3,8 @@ from typing import Optional, Dict, Any, Tuple
 from datetime import datetime
 import secrets
 import string
+import os
+from money import amounts, portion
 
 
 class Database:
@@ -10,6 +12,28 @@ class Database:
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._create_tables()
+        if path != ":memory:":
+            os.chmod(path, 0o600)
+        self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS referral_credits (
+                offer_id INTEGER PRIMARY KEY, user_id INTEGER, amount_cents INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS outbox (
+                id INTEGER PRIMARY KEY, job_key TEXT UNIQUE NOT NULL,
+                payload TEXT NOT NULL, effect TEXT, status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0, next_attempt REAL DEFAULT 0,
+                last_error TEXT, result_message_id INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+            CREATE INDEX IF NOT EXISTS offers_request_status ON offers(request_id,status);
+            CREATE INDEX IF NOT EXISTS offers_seller ON offers(buyer_id);
+            CREATE INDEX IF NOT EXISTS requests_owner ON requests(user_id,status);
+        """)
+        # Historical confirmed payments must not earn another referral credit.
+        self.conn.execute(
+            """INSERT OR IGNORE INTO referral_credits(offer_id,user_id,amount_cents)
+            SELECT id, NULL, 0 FROM offers WHERE final_payment_status='confirmed' """
+        )
+        self.conn.commit()
 
     def _create_tables(self):
         schemas = {
@@ -66,6 +90,8 @@ class Database:
                 ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
                 ("channel_message_id", "INTEGER"),
                 ("channel_is_photo", "INTEGER DEFAULT 0"),
+                ("channel_media_message_id", "INTEGER"),
+                ("revision", "INTEGER NOT NULL DEFAULT 0"),
             ],
             "offers": [
                 ("id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
@@ -87,6 +113,12 @@ class Database:
                 ("manager_track_number", "TEXT"),
                 ("delivery_method", "TEXT"),
                 ("seller_rating", "INTEGER"),
+                ("arrival_notified", "INTEGER NOT NULL DEFAULT 0"),
+                ("buyer_received", "INTEGER NOT NULL DEFAULT 0"),
+                ("funds_sent", "INTEGER NOT NULL DEFAULT 0"),
+                ("buyer_payment_version", "INTEGER NOT NULL DEFAULT 0"),
+                ("seller_payment_version", "INTEGER NOT NULL DEFAULT 0"),
+                ("final_payment_version", "INTEGER NOT NULL DEFAULT 0"),
                 # Deal-reporting fields.  ``buyer_id`` above is the author of the
                 # offer (the seller), so the actual buyer is stored explicitly.
                 ("deal_buyer_id", "INTEGER"),
@@ -113,8 +145,7 @@ class Database:
     def _backfill_deal_statistics(self) -> None:
         """Populate reporting fields for deals created before this migration."""
         cur = self.conn.cursor()
-        cur.execute(
-            """
+        cur.execute("""
             UPDATE offers
                SET deal_buyer_id = COALESCE(
                        deal_buyer_id,
@@ -160,11 +191,12 @@ class Database:
                 OR buyer_deposit_status='confirmed'
                 OR seller_deposit_status='confirmed'
                 OR final_payment_status='confirmed'
-            """
-        )
+            """)
         self.conn.commit()
 
-    def _ensure_table_schema(self, table_name: str, columns: list[tuple[str, str]]) -> None:
+    def _ensure_table_schema(
+        self, table_name: str, columns: list[tuple[str, str]]
+    ) -> None:
         cur = self.conn.cursor()
         cur.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -173,7 +205,9 @@ class Database:
         exists = cur.fetchone() is not None
         column_defs = [f"{name} {definition}" for name, definition in columns]
         if not exists:
-            cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(column_defs)})")
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(column_defs)})"
+            )
             self.conn.commit()
             return
 
@@ -181,47 +215,152 @@ class Database:
         existing_columns = [row["name"] for row in cur.fetchall()]
         desired_columns = [name for name, _ in columns]
         missing = [name for name in desired_columns if name not in existing_columns]
-        extra = [name for name in existing_columns if name not in desired_columns]
 
-        if extra:
-            self._recreate_table(table_name, columns, existing_columns)
-            return
+        # Preserve unknown legacy columns. Migrations must never discard data.
 
         for name in missing:
             definition = dict(columns)[name]
             cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {name} {definition}")
         self.conn.commit()
 
-    def _recreate_table(
-        self,
-        table_name: str,
-        columns: list[tuple[str, str]],
-        existing_columns: list[str],
-    ) -> None:
-        cur = self.conn.cursor()
-        temp_table = f"{table_name}_new"
-        column_defs = [f"{name} {definition}" for name, definition in columns]
-        cur.execute(f"DROP TABLE IF EXISTS {temp_table}")
-        cur.execute(f"CREATE TABLE {temp_table} ({', '.join(column_defs)})")
-
-        desired_columns = [name for name, _ in columns]
-        common_columns = [name for name in desired_columns if name in existing_columns]
-        if common_columns:
-            cols = ", ".join(common_columns)
-            cur.execute(
-                f"INSERT INTO {temp_table} ({cols}) SELECT {cols} FROM {table_name}"
-            )
-
-        cur.execute(f"DROP TABLE {table_name}")
-        cur.execute(f"ALTER TABLE {temp_table} RENAME TO {table_name}")
-        self.conn.commit()
-
     def _row_to_dict(self, row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
 
+    async def delete_request(self, request_id, owner_id):
+        with self.conn:
+            if await self.has_deal_for_request(request_id):
+                return False
+            return (
+                self.conn.execute(
+                    "UPDATE requests SET status='deleted' WHERE id=? AND user_id=? AND status IN ('pending','approved','rejected')",
+                    (request_id, owner_id),
+                ).rowcount
+                == 1
+            )
+
+    async def transition_offer(self, offer_id, new_status, expected):
+        with self.conn:
+            offer = await self.get_offer(offer_id)
+            if (
+                not offer
+                or offer["status"] not in expected
+                or offer["final_status"] in ("completed", "cancelled", "refunded")
+            ):
+                return False
+            if new_status == "buyer_accepted":
+                if self.conn.execute(
+                    "SELECT 1 FROM offers WHERE request_id=? AND id!=? AND status IN ('buyer_accepted','dispute')",
+                    (offer["request_id"], offer_id),
+                ).fetchone():
+                    return False
+            # No await in the setter yields control; the complete check/update is synchronous.
+            await self.set_offer_status(offer_id, new_status)
+            return True
+
+    async def change_payment(self, offer_id, side, target):
+        columns = {
+            "buyer": "buyer_deposit_status",
+            "seller": "seller_deposit_status",
+            "final": "final_payment_status",
+        }
+        column = columns.get(side)
+        if not column or target not in ("pending", "confirmed", "rejected"):
+            return False
+        with self.conn:
+            offer = await self.get_offer(offer_id)
+            if (
+                not offer
+                or offer["status"] != "buyer_accepted"
+                or offer["final_status"] in ("completed", "cancelled", "refunded")
+            ):
+                return False
+            old = offer[column]
+            if (
+                old == "confirmed"
+                or (target == "pending" and old not in ("none", "rejected"))
+                or (target != "pending" and old != "pending")
+            ):
+                return False
+            if side == "final" and (
+                not offer["buyer_received"]
+                or any(
+                    offer[k] != "confirmed"
+                    for k in ("buyer_deposit_status", "seller_deposit_status")
+                )
+            ):
+                return False
+            updated = self.conn.execute(
+                f"UPDATE offers SET {column}=? WHERE id=? AND {column}=?",
+                (target, offer_id, old),
+            ).rowcount
+            if not updated:
+                return False
+            if target == "pending":
+                self.conn.execute(
+                    f"UPDATE offers SET {side}_payment_version={side}_payment_version+1 WHERE id=?",
+                    (offer_id,),
+                )
+            if target == "confirmed":
+                self.conn.execute(
+                    "UPDATE offers SET paid_at=COALESCE(paid_at,CURRENT_TIMESTAMP) WHERE id=?",
+                    (offer_id,),
+                )
+                if side == "final":
+                    self.conn.execute(
+                        "UPDATE offers SET final_status='completed',completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP) WHERE id=?",
+                        (offer_id,),
+                    )
+                    row = self.conn.execute(
+                        "SELECT u.referrer_id FROM requests r JOIN users u ON u.user_id=r.user_id WHERE r.id=?",
+                        (offer["request_id"],),
+                    ).fetchone()
+                    referrer = row[0] if row else None
+                    bonus = portion(amounts(offer["price_cents"])["fee"], "0.10")
+                    inserted = self.conn.execute(
+                        "INSERT OR IGNORE INTO referral_credits(offer_id,user_id,amount_cents) VALUES (?,?,?)",
+                        (offer_id, referrer, bonus),
+                    ).rowcount
+                    if inserted and referrer:
+                        self.conn.execute(
+                            """INSERT INTO referral_balances VALUES (?,?) ON CONFLICT(user_id)
+                            DO UPDATE SET balance_cents=balance_cents+excluded.balance_cents""",
+                            (referrer, bonus),
+                        )
+                else:
+                    self.conn.execute(
+                        """UPDATE offers SET deal_status=CASE WHEN deal_status=0 THEN 1 ELSE deal_status END
+                        WHERE id=? AND buyer_deposit_status='confirmed' AND seller_deposit_status='confirmed'""",
+                        (offer_id,),
+                    )
+            return True
+
+    async def change_stage(self, offer_id, seller_id, stage):
+        if not isinstance(stage, int) or not 1 <= stage <= 6:
+            return False
+        with self.conn:
+            return (
+                self.conn.execute(
+                    """UPDATE offers SET deal_status=? WHERE id=? AND buyer_id=? AND
+                status='buyer_accepted' AND buyer_deposit_status='confirmed' AND seller_deposit_status='confirmed'
+                AND final_payment_status!='confirmed' AND deal_status<=?""",
+                    (stage, offer_id, seller_id, stage),
+                ).rowcount
+                == 1
+            )
+
+    async def set_workflow_flag(self, offer_id, field, value=1):
+        if field not in ("arrival_notified", "buyer_received", "funds_sent"):
+            raise ValueError("Unknown workflow field")
+        with self.conn:
+            self.conn.execute(
+                f"UPDATE offers SET {field}=? WHERE id=?", (value, offer_id)
+            )
+
     # ===== USERS =====
 
-    async def add_user(self, user_id: int, username: Optional[str], full_name: str) -> bool:
+    async def add_user(
+        self, user_id: int, username: Optional[str], full_name: str
+    ) -> bool:
         cur = self.conn.cursor()
         cur.execute("SELECT 1 FROM users WHERE user_id=?", (user_id,))
         is_new = cur.fetchone() is None
@@ -314,7 +453,9 @@ class Database:
         )
         self.conn.commit()
 
-    async def request_referral_withdrawal(self, user_id: int, amount_cents: int) -> bool:
+    async def request_referral_withdrawal(
+        self, user_id: int, amount_cents: int
+    ) -> bool:
         if amount_cents <= 0:
             return False
         cur = self.conn.cursor()
@@ -418,7 +559,7 @@ class Database:
         created_date = dt.strftime("%d.%m.%Y")
 
         cur.execute(
-            "SELECT COUNT(*) AS cnt FROM requests WHERE user_id=? AND status!='deleted'",
+            "SELECT COUNT(*) AS cnt FROM requests WHERE user_id=? AND status IN ('pending','publishing','approved') AND NOT EXISTS (SELECT 1 FROM offers o WHERE o.request_id=requests.id AND o.final_payment_status='confirmed')",
             (user_id,),
         )
         requests_count = cur.fetchone()["cnt"]
@@ -467,10 +608,18 @@ class Database:
         deals_sum = total_cents / 100.0
 
         cur.execute("SELECT * FROM cdek_contacts WHERE user_id=?", (user_id,))
-        cdek = self._row_to_dict(cur.fetchone()) or {"fio": None, "phone": None, "pvz": None}
+        cdek = self._row_to_dict(cur.fetchone()) or {
+            "fio": None,
+            "phone": None,
+            "pvz": None,
+        }
 
         cur.execute("SELECT * FROM requisites WHERE user_id=?", (user_id,))
-        req = self._row_to_dict(cur.fetchone()) or {"fio": None, "card": None, "bank": None}
+        req = self._row_to_dict(cur.fetchone()) or {
+            "fio": None,
+            "card": None,
+            "bank": None,
+        }
 
         return {
             "user_id": user_id,
@@ -513,7 +662,9 @@ class Database:
         new_users = cur.fetchone()["cnt"]
 
         offers_filter, offers_params = build_date_filter("created_at")
-        offers_sql = "SELECT COUNT(*) AS cnt FROM offers WHERE deal_buyer_id IS NOT NULL"
+        offers_sql = (
+            "SELECT COUNT(*) AS cnt FROM offers WHERE deal_buyer_id IS NOT NULL"
+        )
         if offers_filter:
             offers_sql += f" AND {offers_filter}"
         cur.execute(offers_sql, offers_params)
@@ -577,13 +728,19 @@ class Database:
         cancelled = [d for d in deals if d["status"] == "cancelled"]
         terminal_statuses = {"completed", "cancelled", "refunded", "closed_by_seller"}
         terminal = [d for d in deals if d["status"] in terminal_statuses]
-        durations = [d["duration_seconds"] for d in completed if d["duration_seconds"] is not None]
+        durations = [
+            d["duration_seconds"]
+            for d in completed
+            if d["duration_seconds"] is not None
+        ]
         turnover = sum(d["amount_cents"] or 0 for d in completed)
         fees = sum(d["service_fee_cents"] or 0 for d in completed)
         payouts = sum(d["seller_payout_cents"] or 0 for d in completed)
         return {
             "deals": deals,
-            "active_deals_count": sum(d["status"] not in terminal_statuses for d in deals),
+            "active_deals_count": sum(
+                d["status"] not in terminal_statuses for d in deals
+            ),
             "completed_deals_count": len(completed),
             "cancelled_deals_count": len(cancelled),
             "disputed_deals_count": sum(bool(d["is_disputed"]) for d in deals),
@@ -592,19 +749,21 @@ class Database:
             "seller_payout_cents": payouts,
             "average_check_cents": round(turnover / len(completed)) if completed else 0,
             "average_fee_cents": round(fees / len(completed)) if completed else 0,
-            "average_duration_seconds": round(sum(durations) / len(durations)) if durations else 0,
-            "success_percentage": (len(completed) / len(terminal) * 100) if terminal else 0.0,
+            "average_duration_seconds": (
+                round(sum(durations) / len(durations)) if durations else 0
+            ),
+            "success_percentage": (
+                (len(completed) / len(terminal) * 100) if terminal else 0.0
+            ),
         }
 
     async def get_active_deals_summary(self) -> Dict[str, int]:
         cur = self.conn.cursor()
-        cur.execute(
-            """
+        cur.execute("""
             SELECT COUNT(*) AS cnt, COALESCE(SUM(price_cents), 0) AS total
             FROM offers
             WHERE status='approved' AND final_payment_status!='confirmed'
-            """
-        )
+            """)
         row = cur.fetchone()
         return {
             "active_deals_count": row["cnt"],
@@ -744,7 +903,7 @@ class Database:
         cur.execute(
             """
             SELECT * FROM requests
-             WHERE user_id=? AND status!='deleted'
+             WHERE user_id=? AND status IN ('pending','publishing','approved') AND NOT EXISTS (SELECT 1 FROM offers o WHERE o.request_id=requests.id AND o.final_payment_status='confirmed')
              ORDER BY id
              LIMIT 1
             """,
@@ -760,7 +919,7 @@ class Database:
             cur.execute(
                 """
                 SELECT * FROM requests
-                 WHERE user_id=? AND status!='deleted' AND id>?
+                 WHERE user_id=? AND status IN ('pending','publishing','approved') AND NOT EXISTS (SELECT 1 FROM offers o WHERE o.request_id=requests.id AND o.final_payment_status='confirmed') AND id>?
                  ORDER BY id
                  LIMIT 1
                 """,
@@ -770,7 +929,7 @@ class Database:
             cur.execute(
                 """
                 SELECT * FROM requests
-                 WHERE user_id=? AND status!='deleted' AND id<?
+                 WHERE user_id=? AND status IN ('pending','publishing','approved') AND NOT EXISTS (SELECT 1 FROM offers o WHERE o.request_id=requests.id AND o.final_payment_status='confirmed') AND id<?
                  ORDER BY id DESC
                  LIMIT 1
                 """,
@@ -783,7 +942,7 @@ class Database:
     ) -> Tuple[int, int]:
         cur = self.conn.cursor()
         cur.execute(
-            "SELECT id FROM requests WHERE user_id=? AND status!='deleted' ORDER BY id",
+            "SELECT id FROM requests WHERE user_id=? AND status IN ('pending','publishing','approved') AND NOT EXISTS (SELECT 1 FROM offers o WHERE o.request_id=requests.id AND o.final_payment_status='confirmed') ORDER BY id",
             (user_id,),
         )
         rows = cur.fetchall()
@@ -810,18 +969,16 @@ class Database:
         return self._row_to_dict(cur.fetchone())
 
     async def has_deal_for_request(self, request_id: int) -> bool:
-        cur = self.conn.cursor()
-        cur.execute(
-            """
-            SELECT 1
-              FROM offers
-             WHERE request_id=?
-               AND status='approved'
-             LIMIT 1
-            """,
-            (request_id,),
+        return (
+            self.conn.execute(
+                """SELECT 1 FROM offers WHERE request_id=? AND
+            (status IN ('approved','buyer_accepted','dispute') OR
+            buyer_deposit_status='confirmed' OR seller_deposit_status='confirmed' OR
+            final_payment_status='confirmed') LIMIT 1""",
+                (request_id,),
+            ).fetchone()
+            is not None
         )
-        return cur.fetchone() is not None
 
     async def get_request_moderation_thread_id(self, request_id: int) -> Optional[int]:
         cur = self.conn.cursor()
@@ -865,32 +1022,44 @@ class Database:
 
     async def get_offers_count_for_request(self, request_id: int) -> int:
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) AS cnt FROM offers WHERE request_id=?", (request_id,))
+        cur.execute(
+            "SELECT COUNT(*) AS cnt FROM offers WHERE request_id=?", (request_id,)
+        )
         row = cur.fetchone()
         return row["cnt"] if row else 0
 
     # ===== OFFERS =====
 
     async def create_offer(
-        self,
-        request_id: int,
-        buyer_id: int,
-        price_cents: int,
-        days: int,
-        condition: int,
-        photo_file_id: str,
-    ) -> int:
-        cur = self.conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO offers
-                (request_id, buyer_id, price_cents, days, condition, photo_file_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (request_id, buyer_id, price_cents, days, condition, photo_file_id),
-        )
-        self.conn.commit()
-        return cur.lastrowid
+        self, request_id, buyer_id, price_cents, days, condition, photo_file_id
+    ):
+        from money import MAX_PRICE_CENTS
+
+        if not isinstance(price_cents, int) or not 1 <= price_cents <= MAX_PRICE_CENTS:
+            raise ValueError("Некорректная цена.")
+        if (
+            not isinstance(days, int)
+            or not 1 <= days <= 365
+            or not 1 <= condition <= 10
+        ):
+            raise ValueError("Некорректный срок или состояние.")
+        with self.conn:
+            req = self.conn.execute(
+                "SELECT * FROM requests WHERE id=?", (request_id,)
+            ).fetchone()
+            if not req or req["status"] != "approved" or req["user_id"] == buyer_id:
+                raise ValueError("Заявка недоступна для отклика.")
+            if self.conn.execute(
+                "SELECT 1 FROM offers WHERE request_id=? AND status IN ('buyer_accepted','dispute')",
+                (request_id,),
+            ).fetchone():
+                raise ValueError("По заявке уже принята сделка.")
+            cur = self.conn.execute(
+                """INSERT INTO offers(request_id,buyer_id,price_cents,days,condition,photo_file_id)
+                VALUES (?,?,?,?,?,?)""",
+                (request_id, buyer_id, price_cents, days, condition, photo_file_id),
+            )
+            return cur.lastrowid
 
     async def get_offer(self, offer_id: int) -> Optional[Dict[str, Any]]:
         cur = self.conn.cursor()
@@ -923,7 +1092,11 @@ class Database:
                 (status, offer_id),
             )
         elif status in {"closed_by_seller", "buyer_rejected", "cancelled", "refunded"}:
-            final_status = "cancelled" if status in {"closed_by_seller", "buyer_rejected"} else status
+            final_status = (
+                "cancelled"
+                if status in {"closed_by_seller", "buyer_rejected"}
+                else status
+            )
             cur.execute(
                 """UPDATE offers SET status=?, final_status=?,
                           cancelled_at=COALESCE(cancelled_at, CURRENT_TIMESTAMP),
@@ -940,8 +1113,11 @@ class Database:
         self.conn.commit()
 
     async def update_deal_statistics(
-        self, offer_id: int, *, dispute_result: Optional[str] = None,
-        final_status: Optional[str] = None
+        self,
+        offer_id: int,
+        *,
+        dispute_result: Optional[str] = None,
+        final_status: Optional[str] = None,
     ) -> None:
         """Record a moderator-supplied dispute outcome without bypassing transitions."""
         cur = self.conn.cursor()
@@ -1049,7 +1225,7 @@ class Database:
         cur.execute(
             """
             SELECT * FROM offers
-             WHERE buyer_id=?
+             WHERE buyer_id=? AND status IN ('pending','approved','buyer_accepted','dispute') AND final_payment_status!='confirmed'
              ORDER BY id
              LIMIT 1
             """,
@@ -1065,7 +1241,7 @@ class Database:
             cur.execute(
                 """
                 SELECT * FROM offers
-                 WHERE buyer_id=? AND id>?
+                 WHERE buyer_id=? AND status IN ('pending','approved','buyer_accepted','dispute') AND final_payment_status!='confirmed' AND id>?
                  ORDER BY id
                  LIMIT 1
                 """,
@@ -1075,7 +1251,7 @@ class Database:
             cur.execute(
                 """
                 SELECT * FROM offers
-                 WHERE buyer_id=? AND id<?
+                 WHERE buyer_id=? AND status IN ('pending','approved','buyer_accepted','dispute') AND final_payment_status!='confirmed' AND id<?
                  ORDER BY id DESC
                  LIMIT 1
                 """,
@@ -1088,7 +1264,7 @@ class Database:
     ) -> Tuple[int, int]:
         cur = self.conn.cursor()
         cur.execute(
-            "SELECT id FROM offers WHERE buyer_id=? ORDER BY id",
+            "SELECT id FROM offers WHERE buyer_id=? AND status IN ('pending','approved','buyer_accepted','dispute') AND final_payment_status!='confirmed' ORDER BY id",
             (buyer_id,),
         )
         rows = cur.fetchall()

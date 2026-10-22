@@ -1,3 +1,5 @@
+from access import secure_messages
+from access import secure_callbacks
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -8,6 +10,9 @@ from reports import send_report_manual
 
 
 def setup_reports_handlers(router: Router, db: Database, cfg: Config):
+    message_start = len(router.message.handlers)
+    callback_start = len(router.callback_query.handlers)
+
     def _is_moderation_chat(msg: Message) -> bool:
         return msg.chat.id == cfg.MODERATION_CHAT_ID
 
@@ -66,3 +71,64 @@ def setup_reports_handlers(router: Router, db: Database, cfg: Config):
             return
         await send_report_manual(msg.bot, db, cfg, "All time")
         await msg.answer("All time отчет отправлен.")
+
+    @router.message(Command("delivery_status"))
+    async def delivery_status(msg: Message):
+        rows = db.conn.execute(
+            "SELECT status,COUNT(*) FROM outbox GROUP BY status"
+        ).fetchall()
+        await msg.answer(
+            "Доставка сообщений: " + ", ".join(f"{r[0]}: {r[1]}" for r in rows)
+        )
+
+    @router.message(Command("retry_delivery"))
+    async def retry_delivery(msg: Message):
+        from delivery import drain
+
+        with db.conn:
+            db.conn.execute(
+                "UPDATE outbox SET status='pending',attempts=0,next_attempt=0 WHERE status IN ('blocked','pending')"
+            )
+        await drain(db, msg.bot)
+        await msg.answer("Повтор выполнен. Результат: /delivery_status")
+
+    @router.message(Command("resolve_cancel"))
+    async def resolve_cancel(msg: Message):
+        from delivery import content, queue_batch
+
+        try:
+            offer_id = int((msg.text or "").split()[1])
+        except (ValueError, IndexError):
+            await msg.answer(
+                "После проверки расчётов используйте: /resolve_cancel ID_отклика"
+            )
+            return
+        offer = await db.get_offer(offer_id)
+        if (
+            not offer
+            or not offer["is_disputed"]
+            or not await db.transition_offer(offer_id, "cancelled", ("dispute",))
+        ):
+            await msg.answer(
+                "Этот отклик не ожидает решения по спору или уже завершён."
+            )
+            return
+        req = await db.get_request(offer["request_id"])
+        jobs = content(
+            req["user_id"],
+            f"Менеджер подтвердил отмену сделки №{req['id']} после проверки расчётов.",
+        )
+        jobs += content(
+            offer["buyer_id"],
+            f"Менеджер подтвердил отмену сделки №{req['id']} после проверки расчётов.",
+        )
+        delivered = await queue_batch(db, msg.bot, f"cancel-resolved-{offer_id}", jobs)
+        await msg.answer(
+            "Отмена сохранена."
+            if delivered
+            else "Отмена сохранена; уведомления ожидают доставки."
+        )
+
+    secure_callbacks(router, db, cfg, callback_start)
+
+    secure_messages(router, db, cfg, message_start)

@@ -1,3 +1,4 @@
+from contextlib import closing
 from contextlib import redirect_stdout
 from dataclasses import replace
 import gzip
@@ -29,7 +30,9 @@ class BackupTests(unittest.TestCase):
         self.conn.execute("INSERT INTO records VALUES ('saved-record')")
         self.conn.commit()
         self.identity = pyrage.x25519.Identity.generate()
-        self.cfg = BackupConfig(True, str(self.source), "gdrive", str(self.identity.to_public()), 3600)
+        self.cfg = BackupConfig(
+            True, str(self.source), "gdrive", str(self.identity.to_public()), 3600
+        )
         self.uploaded = None
         self.upload_dir = None
         self.remote_calls = []
@@ -45,7 +48,10 @@ class BackupTests(unittest.TestCase):
             self.uploaded = Path(args[1]).read_bytes()
             self.assertTrue(args[2].startswith("gdrive:tg_bot-"))
         if args[0] == "md5sum":
-            return hashlib.md5(self.uploaded, usedforsecurity=False).hexdigest() + "  backup.age\n"
+            return (
+                hashlib.md5(self.uploaded, usedforsecurity=False).hexdigest()
+                + "  backup.age\n"
+            )
         return ""
 
     def test_live_wal_database_is_encrypted_uploaded_and_restorable(self):
@@ -54,11 +60,21 @@ class BackupTests(unittest.TestCase):
         self.assertTrue(filename.endswith(".sqlite.gz.age"))
         self.assertTrue(self.uploaded.startswith(b"age-encryption.org/v1"))
         restored = self.root / "restored.sqlite"
-        restored.write_bytes(gzip.decompress(pyrage.decrypt(self.uploaded, [self.identity])))
-        with sqlite3.connect(restored) as conn:
-            self.assertEqual(conn.execute("SELECT value FROM records").fetchall(), [("saved-record",)])
-            self.assertEqual(conn.execute("PRAGMA integrity_check").fetchall(), [("ok",)])
-        self.assertEqual(self.conn.execute("SELECT value FROM records").fetchall(), [("saved-record",)])
+        restored.write_bytes(
+            gzip.decompress(pyrage.decrypt(self.uploaded, [self.identity]))
+        )
+        with closing(sqlite3.connect(restored)) as conn, conn:
+            self.assertEqual(
+                conn.execute("SELECT value FROM records").fetchall(),
+                [("saved-record",)],
+            )
+            self.assertEqual(
+                conn.execute("PRAGMA integrity_check").fetchall(), [("ok",)]
+            )
+        self.assertEqual(
+            self.conn.execute("SELECT value FROM records").fetchall(),
+            [("saved-record",)],
+        )
         self.assertFalse(self.upload_dir.exists())
 
     def test_failed_upload_cleans_up_transient_snapshot(self):
@@ -67,6 +83,7 @@ class BackupTests(unittest.TestCase):
             if args[0] == "copyto":
                 raise backups.BackupError("upload failed")
             return ""
+
         with patch("backups.run_rclone", side_effect=fail):
             with self.assertRaisesRegex(backups.BackupError, "upload failed"):
                 backups.backup_once(self.cfg)
@@ -76,6 +93,7 @@ class BackupTests(unittest.TestCase):
         def mismatch(cfg, *args):
             result = self.remote(cfg, *args)
             return "wrong-checksum  backup.age" if args[0] == "md5sum" else result
+
         with patch("backups.run_rclone", side_effect=mismatch):
             with self.assertRaisesRegex(backups.BackupError, "Контрольная сумма"):
                 backups.backup_once(self.cfg)
@@ -108,8 +126,12 @@ class BackupTests(unittest.TestCase):
         with patch("backups.subprocess.run", return_value=result) as run:
             backups.run_rclone(self.cfg, "lsf", "gdrive:")
         command = run.call_args.args[0]
-        self.assertEqual(command[command.index("--drive-root-folder-id") + 1], BACKUP_DRIVE_FOLDER_ID)
-        result = subprocess.CompletedProcess([], 1, stdout="", stderr="secret-token-from-backend")
+        self.assertEqual(
+            command[command.index("--drive-root-folder-id") + 1], BACKUP_DRIVE_FOLDER_ID
+        )
+        result = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="secret-token-from-backend"
+        )
         with patch("backups.subprocess.run", return_value=result):
             with self.assertRaises(backups.BackupError) as caught:
                 backups.run_rclone(self.cfg, "lsf", "gdrive:")
@@ -133,9 +155,14 @@ class BackupSchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def test_scheduler_uploads_on_start_and_waits_for_next_hour(self):
         import asyncio
         from unittest.mock import AsyncMock
+
         cfg = BackupConfig(True, "unused.sqlite", "gdrive", "unused", 3600)
         with patch("backups.backup_once", return_value="backup.age") as upload:
-            with patch("backups.asyncio.sleep", new_callable=AsyncMock, side_effect=asyncio.CancelledError) as sleep:
+            with patch(
+                "backups.asyncio.sleep",
+                new_callable=AsyncMock,
+                side_effect=asyncio.CancelledError,
+            ) as sleep:
                 with self.assertRaises(asyncio.CancelledError):
                     await backups.backup_scheduler(cfg)
         upload.assert_called_once_with(cfg)

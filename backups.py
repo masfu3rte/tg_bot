@@ -1,4 +1,5 @@
 """Consistent, encrypted SQLite backups to the configured Google Drive folder."""
+
 import argparse
 import asyncio
 from contextlib import closing
@@ -19,7 +20,6 @@ from uuid import uuid4
 
 from config import BackupConfig, load_backup_config
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +39,9 @@ def load_encryption_module():
 
 def validate_config(cfg: BackupConfig) -> None:
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]*", cfg.remote):
-        raise BackupError("BACKUP_RCLONE_REMOTE должна содержать имя remote rclone без двоеточия.")
+        raise BackupError(
+            "BACKUP_RCLONE_REMOTE должна содержать имя remote rclone без двоеточия."
+        )
     if cfg.interval_seconds < 60:
         raise BackupError("BACKUP_INTERVAL_SECONDS должна быть не меньше 60.")
     if not cfg.recipient:
@@ -48,17 +50,29 @@ def validate_config(cfg: BackupConfig) -> None:
     try:
         pyrage.x25519.Recipient.from_str(cfg.recipient)
     except pyrage.RecipientError:
-        raise BackupError("BACKUP_AGE_RECIPIENT должна содержать публичный ключ age вида age1….") from None
+        raise BackupError(
+            "BACKUP_AGE_RECIPIENT должна содержать публичный ключ age вида age1…."
+        ) from None
     if not shutil.which(cfg.rclone_binary):
-        raise BackupError("Не установлен rclone; установите его или задайте BACKUP_RCLONE_BINARY.")
+        raise BackupError(
+            "Не установлен rclone; установите его или задайте BACKUP_RCLONE_BINARY."
+        )
 
 
 def run_rclone(cfg: BackupConfig, *arguments: str) -> str:
     command = [
-        cfg.rclone_binary, *arguments,
-        "--drive-root-folder-id", cfg.folder_id,
-        "--retries", "3", "--low-level-retries", "3",
-        "--contimeout", "30s", "--timeout", "2m",
+        cfg.rclone_binary,
+        *arguments,
+        "--drive-root-folder-id",
+        cfg.folder_id,
+        "--retries",
+        "3",
+        "--low-level-retries",
+        "3",
+        "--contimeout",
+        "30s",
+        "--timeout",
+        "2m",
     ]
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=300)
@@ -82,7 +96,9 @@ def check_access(cfg: BackupConfig) -> None:
 
 def create_snapshot(source: Path, destination: Path) -> None:
     if not source.is_file():
-        raise BackupError("Файл DB_PATH не найден; пустая база для резервирования не создаётся.")
+        raise BackupError(
+            "Файл DB_PATH не найден; пустая база для резервирования не создаётся."
+        )
     deadline = time.monotonic() + 30
 
     def progress(status, remaining, total):
@@ -90,11 +106,17 @@ def create_snapshot(source: Path, destination: Path) -> None:
             raise BackupError("Не удалось получить снимок SQLite за 30 секунд.")
 
     try:
-        with closing(sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)) as src:
+        with closing(
+            sqlite3.connect(
+                source.resolve().as_uri() + "?mode=ro", uri=True, timeout=10
+            )
+        ) as src:
             with closing(sqlite3.connect(destination)) as snapshot:
                 src.backup(snapshot, pages=256, progress=progress, sleep=0.05)
                 if snapshot.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
-                    raise BackupError("Проверка целостности резервной копии SQLite не прошла.")
+                    raise BackupError(
+                        "Проверка целостности резервной копии SQLite не прошла."
+                    )
         destination.chmod(0o600)
     except sqlite3.Error:
         raise BackupError("Не удалось создать корректный снимок SQLite.") from None
@@ -126,11 +148,14 @@ def backup_once(cfg: BackupConfig) -> str:
         compressed.chmod(0o600)
         try:
             pyrage.encrypt_file(
-                str(compressed), str(encrypted),
+                str(compressed),
+                str(encrypted),
                 [pyrage.x25519.Recipient.from_str(cfg.recipient)],
             )
         except pyrage.EncryptError:
-            raise BackupError("Не удалось зашифровать снимок; загрузка отменена.") from None
+            raise BackupError(
+                "Не удалось зашифровать снимок; загрузка отменена."
+            ) from None
         encrypted.chmod(0o600)
         checksum = file_md5(encrypted)
         run_rclone(cfg, "copyto", str(encrypted), remote_path)
@@ -157,6 +182,9 @@ async def backup_scheduler(cfg: BackupConfig) -> None:
 def start_backup_task() -> asyncio.Task | None:
     cfg = load_backup_config()
     if not cfg.enabled:
+        logger.warning(
+            "Копии Google Drive выключены. Настройте BACKUP_ENABLED и ключ age; локальные копии не защищают от потери диска."
+        )
         return None
     try:
         validate_config(cfg)
@@ -180,9 +208,22 @@ def generate_key(path: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_mutually_exclusive_group()
-    commands.add_argument("--check", action="store_true", help="Проверить настройки и доступ к папке без загрузки БД")
-    commands.add_argument("--loop", action="store_true", help="Запускать резервное копирование по расписанию")
-    commands.add_argument("--generate-key", type=Path, metavar="FILE", help="Создать личный ключ age на доверенном компьютере")
+    commands.add_argument(
+        "--check",
+        action="store_true",
+        help="Проверить настройки и доступ к папке без загрузки БД",
+    )
+    commands.add_argument(
+        "--loop",
+        action="store_true",
+        help="Запускать резервное копирование по расписанию",
+    )
+    commands.add_argument(
+        "--generate-key",
+        type=Path,
+        metavar="FILE",
+        help="Создать личный ключ age на доверенном компьютере",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     try:
@@ -199,7 +240,10 @@ def main() -> int:
         else:
             print("Копия загружена и проверена: " + backup_once(cfg))
     except (BackupError, RuntimeError, OSError) as exc:
-        logger.error("%s", exc if isinstance(exc, (BackupError, RuntimeError)) else type(exc).__name__)
+        logger.error(
+            "%s",
+            exc if isinstance(exc, (BackupError, RuntimeError)) else type(exc).__name__,
+        )
         return 1
     return 0
 

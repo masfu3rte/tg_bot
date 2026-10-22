@@ -2,6 +2,46 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING, Iterable, Sequence
 from xml.sax.saxutils import escape
 import zipfile
+from html import escape as _escape
+
+
+class SafeHTML(str):
+    pass
+
+
+def escape_text(value):
+    return (
+        value
+        if isinstance(value, SafeHTML)
+        else SafeHTML(_escape(str(value or ""), quote=True))
+    )
+
+
+def escape_record(record):
+    if record is None:
+        return None
+    fields = {
+        "internal_title",
+        "item_name",
+        "description",
+        "fio",
+        "phone",
+        "pvz",
+        "card",
+        "bank",
+        "track_number",
+        "manager_track_number",
+        "full_name",
+    }
+    return {
+        k: (
+            escape_record(v)
+            if isinstance(v, dict)
+            else escape_text(v) if k in fields and v is not None else v
+        )
+        for k, v in record.items()
+    }
+
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -44,7 +84,9 @@ def build_direct_link(cfg: "Config", message_id: int) -> str:
     return f"https://t.me/c/{internal}/{message_id}"
 
 
-def write_simple_xlsx(path: str, sheet_name: str, rows: Iterable[Iterable[str]]) -> None:
+def write_simple_xlsx(
+    path: str, sheet_name: str, rows: Iterable[Iterable[str]]
+) -> None:
     sheet_xml_rows = []
     for row_idx, row in enumerate(rows, start=1):
         cells = []
@@ -131,10 +173,16 @@ def write_report_xlsx(
             cell.font = Font(bold=True)
         for column_cells in worksheet.columns:
             width = min(
-                max((len(str(cell.value)) if cell.value is not None else 0) for cell in column_cells) + 2,
+                max(
+                    (len(str(cell.value)) if cell.value is not None else 0)
+                    for cell in column_cells
+                )
+                + 2,
                 45,
             )
-            worksheet.column_dimensions[get_column_letter(column_cells[0].column)].width = width
+            worksheet.column_dimensions[
+                get_column_letter(column_cells[0].column)
+            ].width = width
 
     deals.freeze_panes = "A2"
     if deals.max_row:
@@ -147,7 +195,7 @@ def write_report_xlsx(
             if isinstance(row[index - 1].value, datetime):
                 row[index - 1].number_format = "DD.MM.YYYY HH:MM"
         for index in money_columns:
-            row[index - 1].number_format = '#,##0.00'
+            row[index - 1].number_format = "#,##0.00"
 
     for row in summary.iter_rows(min_row=2):
         if row[0].value in {
@@ -157,7 +205,7 @@ def write_report_xlsx(
             "Средний чек",
             "Средняя комиссия",
         }:
-            row[1].number_format = '#,##0.00'
+            row[1].number_format = "#,##0.00"
         elif row[0].value == "Процент успешно завершенных сделок":
             row[1].number_format = '0.00"%"'
 
