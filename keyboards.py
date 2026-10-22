@@ -54,31 +54,19 @@ class Keyboards:
     def help_menu(
         support_url: str,
         channel_url: str,
-        requests_channel_url: str,
-        ads_url: str,
+        offer_url: str,
+        privacy_policy_url: str,
     ) -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🆘 Техподдержка", url=support_url)],
-                [InlineKeyboardButton(text="📢 Канал сервиса", url=channel_url)],
-                *(
-                    [
-                        [
-                            InlineKeyboardButton(
-                                text="🧾 Канал с запросами", url=requests_channel_url
-                            )
-                        ]
-                    ]
-                    if requests_channel_url
-                    else []
-                ),
-                *(
-                    [[InlineKeyboardButton(text="💰 Размещение рекламы", url=ads_url)]]
-                    if ads_url
-                    else []
-                ),
-            ]
+        keyboard = Keyboards.start_menu(
+            offer_url=offer_url,
+            privacy_policy_url=privacy_policy_url,
+            channel_url=channel_url,
+            show_accept=False,
         )
+        keyboard.inline_keyboard.append(
+            [InlineKeyboardButton(text="🆘 Техподдержка", url=support_url)]
+        )
+        return keyboard
 
     @staticmethod
     def my_requests_menu() -> InlineKeyboardMarkup:

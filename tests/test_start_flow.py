@@ -25,6 +25,9 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
             OFFER_URL="https://example.com/offer",
             PRIVACY_POLICY_URL="https://example.com/privacy",
             CHANNEL_URL="https://t.me/someout",
+            SUPPORT_URL="https://t.me/someoutmanager",
+            REQUESTS_CHANNEL_URL="https://example.com/old-requests",
+            ADS_URL="https://example.com/old-ads",
         )
         self.cfg = cfg
         router = Router()
@@ -38,6 +41,11 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
             h.callback
             for h in router.message.handlers
             if h.callback.__name__ == "info_cmd"
+        )
+        self.help = next(
+            h.callback
+            for h in router.message.handlers
+            if h.callback.__name__ == "help_cmd"
         )
         self.accept = router.callback_query.handlers[0].callback
         self.user = SimpleNamespace(id=101, username="seller", full_name="Seller")
@@ -153,6 +161,37 @@ class StartFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assert_terms_shown()
         self.assertFalse(await self.db.is_offer_accepted(101))
         self.callback_msg.answer.assert_not_awaited()
+
+    async def test_help_has_document_channel_and_support_links_only(self):
+        await self.help(self.msg)
+        self.msg.answer.assert_awaited_once()
+        self.msg.bot.copy_message.assert_not_awaited()
+        buttons = [
+            button
+            for row in self.msg.answer.await_args.kwargs["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(
+            [(button.text, button.url) for button in buttons],
+            [
+                ("📄 Публичная оферта", self.cfg.OFFER_URL),
+                ("Политика обработки данных", self.cfg.PRIVACY_POLICY_URL),
+                ("📢 Канал сервиса", self.cfg.CHANNEL_URL),
+                ("🆘 Техподдержка", self.cfg.SUPPORT_URL),
+            ],
+        )
+        self.assertTrue(all(button.callback_data is None for button in buttons))
+        self.assertNotIn("Приветствуем", self.msg.answer.await_args.args[0])
+
+    def test_welcome_guides_match_reader_roles(self):
+        self.assertIn(
+            '<a href="https://t.me/someout/446">Гайд по пользованию для покупателей</a>',
+            WELCOME_TEXT,
+        )
+        self.assertIn(
+            '<a href="https://t.me/someout/445">Гайд по пользованию для продавцов</a>',
+            WELCOME_TEXT,
+        )
 
     async def test_info_shows_only_documents_and_channel_without_welcome_or_banner(
         self,

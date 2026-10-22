@@ -4,7 +4,13 @@ import unittest
 
 from aiogram import Bot, Router
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import AnswerCallbackQuery, EditMessageCaption, EditMessageText
+from aiogram.methods import (
+    AnswerCallbackQuery,
+    EditMessageCaption,
+    EditMessageText,
+    SendPhoto,
+    SendMessage,
+)
 from aiogram.types import CallbackQuery, Chat, Message, PhotoSize, User
 
 from db import Database
@@ -119,6 +125,43 @@ class ModerationCaptionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(edit.message_id, 55)
         self.assertIsNone(edit.reply_markup)
         return edit
+
+    async def test_approval_sends_seller_photo_and_decision_buttons_to_buyer(self):
+        await self.invoke("offer_approve", "offer:approve")
+        sent = [
+            call
+            for call in self.session.calls
+            if isinstance(call, (SendPhoto, SendMessage)) and call.chat_id == 101
+        ]
+        self.assertEqual(len(sent), 1)
+        self.assertIsInstance(sent[0], SendPhoto)
+        self.assertEqual(sent[0].photo, "offer-photo")
+        self.assertIn("одобрен отклик", sent[0].caption)
+        self.assertIn("Цена: 1130.00 ₽", sent[0].caption)
+        self.assertEqual(
+            [
+                button.callback_data
+                for row in sent[0].reply_markup.inline_keyboard
+                for button in row
+            ],
+            [f"offer:buyer_accept:{self.offer_id}", f"offer:buyer_reject:{self.offer_id}"],
+        )
+
+    async def test_legacy_offer_without_photo_sends_text_instead_of_request_photo(self):
+        self.db.conn.execute(
+            "UPDATE offers SET photo_file_id=NULL WHERE id=?", (self.offer_id,)
+        )
+        self.db.conn.commit()
+        await self.invoke("offer_approve", "offer:approve")
+        sent = [
+            call
+            for call in self.session.calls
+            if isinstance(call, (SendPhoto, SendMessage)) and call.chat_id == 101
+        ]
+        self.assertEqual(len(sent), 1)
+        self.assertIsInstance(sent[0], SendMessage)
+        self.assertIn("Принять отклик?", sent[0].text)
+        self.assertIsNotNone(sent[0].reply_markup)
 
     async def test_moderation_preserves_order_caption(self):
         await self.invoke("offer_approve", "offer:approve")
